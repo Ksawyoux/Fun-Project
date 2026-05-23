@@ -31,6 +31,59 @@ func (s *Store) GetRelationship(ctx context.Context, id string) (*schema.Relatio
 	return scanRelationship(row)
 }
 
+// ListEntitiesByNamespace returns all active entities in a namespace, ordered
+// by canonical_name. Used by Zone 5's Health Auditor which needs to scan a
+// workspace to find cycles, supernodes, etc. Hard-capped at 5000 to keep the
+// payload bounded — callers needing more should paginate (deferred).
+func (s *Store) ListEntitiesByNamespace(ctx context.Context, namespace string) ([]*schema.Entity, error) {
+	rows, err := s.db.QueryContext(ctx, `
+        SELECT `+entityColumns+`
+          FROM entities
+         WHERE namespace = ? AND is_active = 1
+         ORDER BY canonical_name ASC
+         LIMIT 5000
+    `, namespace)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*schema.Entity
+	for rows.Next() {
+		e, err := scanEntity(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// ListRelationshipsByNamespace returns all active relationships where both
+// endpoints share the namespace. Needed for cycle/supernode detection.
+func (s *Store) ListRelationshipsByNamespace(ctx context.Context, namespace string) ([]*schema.Relationship, error) {
+	rows, err := s.db.QueryContext(ctx, `
+        SELECT `+relColumns+`
+          FROM relationships r
+         WHERE r.is_active = 1
+           AND EXISTS (SELECT 1 FROM entities e WHERE e.id = r.from_id AND e.namespace = ?)
+           AND EXISTS (SELECT 1 FROM entities e WHERE e.id = r.to_id   AND e.namespace = ?)
+         LIMIT 20000
+    `, namespace, namespace)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*schema.Relationship
+	for rows.Next() {
+		r, err := scanRelationship(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // Neighborhood is the result of an N-hop traversal starting from an origin.
 type Neighborhood struct {
 	Origin   *schema.Entity         `json:"origin"`

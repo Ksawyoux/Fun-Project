@@ -94,16 +94,35 @@ func (s *Server) handleGetEntity(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetEntityByName(w http.ResponseWriter, r *http.Request) {
 	ns := r.URL.Query().Get("namespace")
 	name := r.URL.Query().Get("name")
-	if ns == "" || name == "" {
-		writeError(w, http.StatusBadRequest, "missing_params", "namespace and name query params required")
+	if ns == "" {
+		writeError(w, http.StatusBadRequest, "missing_params", "namespace query param required")
 		return
 	}
-	e, err := s.store.GetEntityByName(r.Context(), ns, name)
+	if name != "" {
+		e, err := s.store.GetEntityByName(r.Context(), ns, name)
+		if err != nil {
+			writeStoreErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, e)
+		return
+	}
+	// No name → list active entities in the namespace.
+	entities, err := s.store.ListEntitiesByNamespace(r.Context(), ns)
 	if err != nil {
-		writeStoreErr(w, err)
+		writeError(w, http.StatusInternalServerError, "list_failed", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, e)
+	rels, err := s.store.ListRelationshipsByNamespace(r.Context(), ns)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "list_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"namespace":     ns,
+		"entities":      entities,
+		"relationships": rels,
+	})
 }
 
 func (s *Server) handleNeighborhood(w http.ResponseWriter, r *http.Request) {
