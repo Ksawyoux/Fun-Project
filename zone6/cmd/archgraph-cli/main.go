@@ -123,10 +123,20 @@ type SourceInfo struct {
 	ObservedAt time.Time `json:"observed_at"`
 }
 
+type Relationship struct {
+	ID         string         `json:"id"`
+	Type       string         `json:"type"`
+	FromID     string         `json:"from_id"`
+	ToID       string         `json:"to_id"`
+	Confidence float64        `json:"confidence"`
+	IsActive   bool           `json:"is_active"`
+	Properties map[string]any `json:"properties,omitempty"`
+}
+
 type NamespaceListing struct {
-	Namespace     string    `json:"namespace"`
-	Entities      []*Entity `json:"entities"`
-	Relationships []any     `json:"relationships"`
+	Namespace     string          `json:"namespace"`
+	Entities      []*Entity       `json:"entities"`
+	Relationships []*Relationship `json:"relationships"`
 }
 
 // Config maps .archgraph.yaml
@@ -182,6 +192,8 @@ func main() {
 		handleImpact(ctx, *zone4Addr, *zone5Addr, cfg.Namespace, subArgs)
 	case "validate":
 		handleValidate(ctx, *zone4Addr, *zone5Addr, cfg, subArgs)
+	case "graph":
+		handleGraph(ctx, *zone4Addr, cfg.Namespace, subArgs)
 	default:
 		fmt.Printf("Unknown subcommand: %s\n", subcommand)
 		printUsage()
@@ -196,6 +208,7 @@ func printUsage() {
 	fmt.Println("  -zone5  string  Zone 5 base URL (default: http://localhost:8081)")
 	fmt.Println("  -config string  Path to governance config (default: .archgraph.yaml)")
 	fmt.Println("\nSubcommands:")
+	fmt.Println("  graph                               Draw visual dependency graph in the terminal")
 	fmt.Println("  query \"<question>\"                  Run natural-language queries against serving layer")
 	fmt.Println("  diff <commit_sha_1> <commit_sha_2>  Compare structural changes between two Git commits")
 	fmt.Println("  impact --file <path> [--line <num>] Calculate blast radius of a file or code block")
@@ -713,5 +726,162 @@ func printHealthReport(hr *HealthReport) {
 	fmt.Println("Smells Detected:")
 	for _, smell := range hr.Smells {
 		fmt.Printf("  [%s] %s: %s (Nodes: %v)\n", smell.Severity, smell.Type, smell.Message, smell.Nodes)
+	}
+}
+
+func handleGraph(ctx context.Context, zone4Addr, namespace string, args []string) {
+	var format string
+	fs := flag.NewFlagSet("graph", flag.ExitOnError)
+	fs.StringVar(&format, "format", "tree", "Output format: tree | mermaid")
+	_ = fs.Parse(args)
+
+	listing, err := fetchNamespaceListing(ctx, zone4Addr, namespace)
+	if err != nil {
+		fmt.Printf("Error fetching namespace graph: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(listing.Entities) == 0 {
+		fmt.Println("No entities found in this namespace.")
+		return
+	}
+
+	if format == "mermaid" {
+		fmt.Println("```mermaid")
+		fmt.Println("flowchart TD")
+		
+		// Define nodes
+		for _, e := range listing.Entities {
+			cleanName := strings.ReplaceAll(e.CanonicalName, "\"", "\\\"")
+			fmt.Printf("    %s[\"%s (%s)\"]\n", e.ID, cleanName, e.Type)
+		}
+		
+		// Define connections
+		for _, r := range listing.Relationships {
+			fmt.Printf("    %s -->|%s| %s\n", r.FromID, r.Type, r.ToID)
+		}
+		
+		fmt.Println("```")
+		return
+	}
+
+	entMap := make(map[string]*Entity)
+	for _, e := range listing.Entities {
+		entMap[e.ID] = e
+	}
+
+	outRels := make(map[string][]*Relationship)
+	for _, r := range listing.Relationships {
+		outRels[r.FromID] = append(outRels[r.FromID], r)
+	}
+
+	fmt.Printf("🏗️  Visualizing Architecture Graph for Namespace: \033[1;35m%s\033[0m\n", namespace)
+	fmt.Println(strings.Repeat("=", 60))
+
+	isCalled := make(map[string]bool)
+	for _, r := range listing.Relationships {
+		isCalled[r.ToID] = true
+	}
+
+	var startNodes []*Entity
+	for _, e := range listing.Entities {
+		if e.Type == "SERVICE" && !isCalled[e.ID] {
+			startNodes = append(startNodes, e)
+		}
+	}
+
+	if len(startNodes) == 0 {
+		for _, e := range listing.Entities {
+			if e.Type == "SERVICE" {
+				startNodes = append(startNodes, e)
+			}
+		}
+	}
+
+	if len(startNodes) == 0 {
+		startNodes = listing.Entities
+	}
+
+	for _, start := range startNodes {
+		visited := make(map[string]bool)
+		printNodeTree(start, entMap, outRels, visited, 0, "", "")
+		fmt.Println()
+	}
+}
+
+func fetchNamespaceListing(ctx context.Context, zone4Addr, namespace string) (*NamespaceListing, error) {
+	u := fmt.Sprintf("%s/v1/entities?namespace=%s", zone4Addr, url.QueryEscape(namespace))
+	resp, err := http.Get(u)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("http error %d: %s", resp.StatusCode, b)
+	}
+
+	var listing NamespaceListing
+	if err := json.NewDecoder(resp.Body).Decode(&listing); err != nil {
+		return nil, err
+	}
+	return &listing, nil
+}
+
+func printNodeTree(n *Entity, entMap map[string]*Entity, outRels map[string][]*Relationship, visited map[string]bool, depth int, printPrefix string, childPrefix string) {
+	cyan := "\033[36m"
+	green := "\033[32m"
+	reset := "\033[0m"
+	red := "\033[31;1m"
+	gray := "\033[90m"
+
+	color := reset
+	if n.Type == "SERVICE" {
+		color = cyan
+	} else if n.Type == "DATABASE_TABLE" {
+		color = green
+	}
+
+	fmt.Printf("%s%s[%s]%s %s(%s)%s", printPrefix, color, n.CanonicalName, reset, gray, n.Type, reset)
+
+	if visited[n.ID] {
+		fmt.Printf(" %s[CYCLE]%s\n", red, reset)
+		return
+	}
+	fmt.Println()
+
+	rels := outRels[n.ID]
+	if len(rels) == 0 {
+		return
+	}
+
+	newVisited := make(map[string]bool)
+	for k, v := range visited {
+		newVisited[k] = v
+	}
+	newVisited[n.ID] = true
+
+	for i, r := range rels {
+		target, ok := entMap[r.ToID]
+		if !ok {
+			continue
+		}
+
+		isLastRel := (i == len(rels)-1)
+
+		var nextPrintPrefix string
+		var nextChildPrefix string
+
+		yellow := "\033[33m"
+		if isLastRel {
+			nextPrintPrefix = childPrefix + "└── " + yellow + fmt.Sprintf("(%s)", r.Type) + reset + " ──► "
+			nextChildPrefix = childPrefix + "    "
+		} else {
+			nextPrintPrefix = childPrefix + "├── " + yellow + fmt.Sprintf("(%s)", r.Type) + reset + " ──► "
+			nextChildPrefix = childPrefix + "│   "
+		}
+
+		printNodeTree(target, entMap, outRels, newVisited, depth+1, nextPrintPrefix, nextChildPrefix)
 	}
 }
