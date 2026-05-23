@@ -12,7 +12,8 @@
       "Bash(chmod -R u+w /Users/MacBook/go/pkg/mod/modernc.org)",
       "Bash(rm -rf /Users/MacBook/go/pkg/mod/cache/download/modernc.org /Users/MacBook/go/pkg/mod/modernc.org)",
       "Bash(go mod *)",
-      "Bash(go build *)"
+      "Bash(go build *)",
+      "Bash(go test *)"
     ]
   },
   "enabledMcpjsonServers": [
