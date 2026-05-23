@@ -244,12 +244,15 @@ For more details, see the **[Zone 5 README](file:///Users/MacBook/Fun_Project/Fu
 Located in **[zone6/](file:///Users/MacBook/Fun_Project/Fun-Project/zone6)**, this module contains the user interaction interfaces, acting as both an interactive command-line tool (`archgraph`) and a Model Context Protocol (MCP) server over `stdio`.
 
 ### Key CLI Subcommands
-* `graph [-format tree|mermaid]` — Visualizes the current codebase dependency tree in the terminal with ANSI colors, or prints copy-pasteable Mermaid flowchart diagrams.
-* `query "<question>"` — Interrogates the codebase architecture in natural language via the serving layer.
-* `diff <commit1> <commit2>` — Detects and lists architectural drift changes between two Git commits.
-* `impact --file <path> [--line <number>]` / `impact <entity_id>` — Traverses downstreams to compute the blast radius of proposed file changes.
-* `validate [--detail]` — Audits system topology (cycles, database couplings, service owners) against boundary rules configured in `.archgraph.yaml`.
-* `document [--out <file>]` — Dynamically auto-generates comprehensive system documentation, automatically reading and hoisting submodule `README.md` files (README-First approach).
+
+| Command | Description |
+|---------|-------------|
+| `graph [-format tree\|mermaid]` | Visualizes the codebase dependency tree in the terminal with ANSI colors, or prints a copy-pasteable Mermaid flowchart diagram. |
+| `query "<question>"` | Interrogates the codebase architecture in natural language via the serving layer. |
+| `diff <commit1> <commit2>` | Detects and lists architectural drift changes between two Git commits. |
+| `impact --file <path> [--line <number>]` / `impact <entity_id>` | Traverses downstreams to compute the blast radius of proposed file changes. |
+| `validate [--detail]` | Audits system topology (cycles, database couplings, service owners) against boundary rules configured in `.archgraph.yaml`. |
+| `document [--out <file>]` | Dynamically auto-generates comprehensive system documentation, hoisting submodule `README.md` files (README-First approach). |
 
 ### Embedded Model Context Protocol (MCP) Server
 When run via `archgraph mcp`, the binary acts as an MCP server over standard input/output (`stdio`), exposing custom capabilities to AI clients like Cursor, Claude Code, and Gemini CLI:
