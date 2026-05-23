@@ -4,18 +4,105 @@ Welcome to the **AI Codebase Knowledge Graph** repository. This project is a sta
 
 ---
 
-## 🗺️ High-Level Architecture
+## 🗺️ High-Level Architecture (The 6 Zones)
 
-The overall system is divided into **6 logical zones**, as detailed in the architectural documentation:
+The system is organized into **6 logical zones**, running from signal capture all the way to user interaction interfaces. Here is how they connect:
 
-1. **[Zone 1: Signal Sources](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/Zone1.md)** — Feeds raw static (Git, AST, APIs, CI/CD, Infra) and dynamic (Distributed Tracing, Metrics, APM) data.
-2. **[Zone 2: Ingestion Subsystem](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/Zone2.md)** — Standardizes data into the Normalized Ingestion Format (NIF) and queues it on the event bus.
-3. **[Zone 3: Processing Pipeline](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/Zone3.md)** — Resolves entity identities, infers hidden relationships, validates facts, and computes graph deltas.
-4. **[Zone 4: Graph Storage (MVP Implemented)](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/Zone4.md)** — The system's central memory. Employs the core principle: **the delta log is the source of truth, and the graph is a projection**.
-5. **[Zone 5: Intelligence & Serving Layer (MVP Implemented)](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/Zone5.md)** — The reasoning brain and voice. Routes queries, plans graph traversals, performs analytics, and coordinates LLM-based reasoning.
-6. **[Zone 6: Consumer Interfaces](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/Zone6.md)** — Exposes visual dashboards, IDE integrations, CLI tools, and chat bots.
+```mermaid
+flowchart TD
+    subgraph Zone1 ["Zone 1: Signal Sources"]
+        Git["Git Repositories"]
+        AST["AST Code Parsers"]
+        APIs["API Specifications"]
+        Trace["Distributed Tracing"]
+        Metrics["Metrics & APM"]
+    end
 
-Refer to the main **[HighLevelArchi.md](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/HighLevelArchi.md)** file for a deep dive into the complete architectural blueprint.
+    subgraph Zone2 ["Zone 2: Ingestion Subsystem"]
+        Connectors["Source Connectors"]
+        Ingestors["Ingestor Pool"]
+        NIF["NIF Normalizer"]
+        Ledger["Ingestion Ledger & Event Bus"]
+    end
+
+    subgraph Zone3 ["Zone 3: Processing Pipeline"]
+        Parse["Parse & Classify"]
+        Resolve["Entity ID Resolver"]
+        Infer["Relationship Inferrer"]
+        Enrich["Context Enricher"]
+        Delta["Delta Compute"]
+    end
+
+    subgraph Zone4 ["Zone 4: Graph Storage"]
+        MutationAPI["Mutation API"]
+        GraphDB["Live Graph DB (SQLite)"]
+        DeltaLog["Delta Log (Source of Truth)"]
+    end
+
+    subgraph Zone5 ["Zone 5: Intelligence & Serving"]
+        QueryEngine["Query Engine"]
+        Analytics["Specialized Analytics (Blast Radius & Health SCC)"]
+        LLMReason["LLM Reasoner & Context Assembler"]
+        PublicAPI["Public API (REST)"]
+    end
+
+    subgraph Zone6 ["Zone 6: Consumer Interfaces"]
+        IDE["IDE Plugins"]
+        WebDash["Web Dashboard"]
+        CLI["CLI Tool & CI Gates"]
+    end
+
+    %% Data flow connections
+    Git & AST & APIs & Trace & Metrics --> Connectors
+    Connectors --> Ingestors --> NIF --> Ledger
+    Ledger --> Parse --> Resolve --> Infer --> Enrich --> Delta
+    Delta --> MutationAPI
+    MutationAPI --> GraphDB & DeltaLog
+    GraphDB & DeltaLog --> QueryEngine & Analytics & LLMReason
+    QueryEngine & Analytics & LLMReason --> PublicAPI
+    PublicAPI --> IDE & WebDash & CLI
+
+    %% Styling
+    style Zone1 fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#0d47a1
+    style Zone2 fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#1b5e20
+    style Zone3 fill:#fffde7,stroke:#fbc02d,stroke-width:2px,color:#f57f17
+    style Zone4 fill:#ffebee,stroke:#c62828,stroke-width:2px,color:#b71c1c
+    style Zone5 fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px,color:#4a148c
+    style Zone6 fill:#efebe9,stroke:#4e342e,stroke-width:2px,color:#3e2723
+
+    classDef default fill:#ffffff,stroke:#333,stroke-width:1px;
+```
+
+---
+
+## 🔄 End-to-End Data Flow
+
+The sequence below illustrates how a change in the codebase propagates through the architecture to update the serving layer:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Dev as Developer / Codebase
+    participant Z1 as Zone 1: Signal Sources
+    participant Z2 as Zone 2: Ingestion
+    participant Z3 as Zone 3: Pipeline
+    participant Z4 as Zone 4: Graph Storage
+    participant Z5 as Zone 5: Intelligence
+
+    Dev->>Z1: Code Push / API change / Trace hit
+    Z1->>Z2: Emit raw event
+    Z2->>Z2: Normalize to NIF (Unified Format)
+    Z2->>Z3: Publish to Event Bus
+    Z3->>Z3: Parse, Resolve Entity & Infer Relationships
+    Z3->>Z3: Validate and Compute Delta Mutation
+    Z3->>Z4: POST /v1/mutations (Batch)
+    Z4->>Z4: Write to Delta Log (Truth) & project to SQLite (Graph)
+    Dev->>Z5: Natural Language Query (e.g., "What depends on X?")
+    Z5->>Z4: Query entities/neighborhood
+    Z4-->>Z5: Return structural subgraphs
+    Z5->>Z5: LLM Context Assembly & Analysis (Blast Radius/Cycles)
+    Z5-->>Dev: Formatted answer with Mermaid & Citations
+```
 
 ---
 
@@ -25,6 +112,9 @@ The repository is structured as a Go multi-module workspace containing the prima
 
 * **[cmd/archgraph/](file:///Users/MacBook/Fun_Project/Fun-Project/cmd/archgraph)** — Supervisor tool to coordinate local development.
 * **[documentation/](file:///Users/MacBook/Fun_Project/Fun-Project/documentation)** — High-level architecture and system design specs.
+  * **[HighLevelArchi.md](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/HighLevelArchi.md)** — Architectural Overview.
+  * **[Zone 1 Specifications](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/Zone1.md)** | **[Zone 2 Specifications](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/Zone2.md)** | **[Zone 3 Specifications](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/Zone3.md)**
+  * **[Zone 4 Specifications](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/Zone4.md)** | **[Zone 5 Specifications](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/Zone5.md)** | **[Zone 6 Specifications](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/Zone6.md)**
 * **[zone4/](file:///Users/MacBook/Fun_Project/Fun-Project/zone4)** — Zone 4 (Graph Storage) Go module.
 * **[zone5/](file:///Users/MacBook/Fun_Project/Fun-Project/zone5)** — Zone 5 (Intelligence & Serving Layer) Go module.
 
@@ -89,7 +179,7 @@ Located in **[zone5/](file:///Users/MacBook/Fun_Project/Fun-Project/zone5)**, th
 * **LLM Reasoner:** Orchestrates responses using LLM prompting (currently stubbed for local testing).
 * **Analytical Engines:** 
   * **Blast Radius Engine:** Computes transitive downstream impact of changes.
-  * **Health Auditor:** Detects architectural smells, circular dependencies (using Tarjan's Strongly Connected Components), and shared database coupling.
+  * **Health Auditor:** Detects circular dependencies (using Tarjan's Strongly Connected Components) and shared database coupling.
   * **Evolution Tracker:** Compares codebase state over time using delta log replays.
 
 ### Key Endpoints (Port 8081)
