@@ -1,4 +1,13 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(go version *)",
+      "Bash(command -v brew)",
+      "Bash(brew list *)",
+      "Read(//usr/local/go/bin/**)",
+      "Read(//opt/homebrew/bin/**)"
+    ]
+  },
   "enabledMcpjsonServers": [
     "framer"
   ]
