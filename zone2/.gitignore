@@ -1,0 +1,4 @@
+zone2d
+*.test
+*.out
+data/

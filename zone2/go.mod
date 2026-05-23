@@ -1,0 +1,3 @@
+module archgraph/zone2
+
+go 1.22
