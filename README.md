@@ -154,6 +154,48 @@ Once running, you will see prefixed logs (`[zone4]` and `[zone5]`) interleaved r
 
 ---
 
+## 🟩 Zone 2 — Ingestion Subsystem (MVP)
+
+Located in **[zone2/](file:///Users/MacBook/Fun_Project/Fun-Project/zone2)**, this module reaches into signal sources (Zone 1), normalizes raw records into a **Normalized Ingestion Format (NIF)**, and delivers them downstream. Source isolation is enforced: nothing downstream knows about Git, filesystems, or AST nodes — only NIF.
+
+### Key Features
+* **Source Connectors:** Pull-based connectors that scan local repositories on demand.
+* **Ingestors:** Git history extractor (via the system `git` CLI) and Go AST parser (via `go/parser`) that extract entities and relationships from code.
+* **NIF Normalization:** Unified type system with deterministic SHA-256 entity IDs and built-in schema validation.
+* **Orchestration:** In-process topological DAG runner with concurrent independent branches and partial-failure isolation.
+* **Delivery:** `Zone4Sink` (HTTP POST to `/v1/mutations`) or `FileSink` (JSONL for offline testing).
+* **Observability:** Append-only ingestion ledger, JSONL dead-letter queue, and on-demand staleness lookups.
+
+### Key Endpoints (Port 8082)
+* `POST /v1/runs` — Trigger an ingestion run for a configured source.
+* `GET /v1/ledger` — Query the append-only ingestion activity log.
+* `GET /v1/staleness` — Check freshness of previously ingested sources.
+* `GET /v1/health` — Liveness probe.
+
+For more details, see the **[Zone 2 README](file:///Users/MacBook/Fun_Project/Fun-Project/zone2/README.md)**.
+
+---
+
+## 🟨 Zone 3 — Processing Pipeline (MVP)
+
+Located in **[zone3/](file:///Users/MacBook/Fun_Project/Fun-Project/zone3)**, this module is the intelligence layer between raw ingestion and the graph store. It transforms ambiguous, multi-source NIF records into confident, resolved, enriched graph mutations ready for Zone 4.
+
+### Key Features
+* **6-Stage Pipeline:** Records flow through Parse & Classify → Entity Resolution → Relationship Inference → Enrichment → Validation → Delta Computation.
+* **Entity Registry:** A dedicated SQLite-backed local registry that tracks canonical IDs, aliases, and resolution history for fast entity deduplication.
+* **Confidence Scoring:** Every entity and relationship is scored using multi-signal weighted heuristics (exact match, fuzzy match, structural match, co-occurrence, temporal).
+* **Relationship Inference:** Automatically derives hidden dependencies — shared database coupling (`CHANGE_COUPLED_WITH`), transitive structural chains, and runtime co-occurrence patterns.
+* **Enrichment:** Computes ownership, velocity, criticality, and maturity scores per entity using configurable scoring rules.
+* **Delta Computation:** Compares pipeline output against current graph state (via Zone 4) and emits minimal, batched mutation plans.
+
+### Key Endpoints (Port 8082)
+* `POST /v1/ingest` — Submit a batch of NIF records for full pipeline processing.
+* `GET /v1/health` — Liveness probe.
+
+For more details, see the **[Zone 3 Specifications](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/Zone3.md)**.
+
+---
+
 ## 🟥 Zone 4 — Graph Storage (MVP)
 
 Located in **[zone4/](file:///Users/MacBook/Fun_Project/Fun-Project/zone4)**, this is a single-process, SQLite-backed implementation of the graph storage layer.
@@ -211,17 +253,24 @@ Located in **[zone6/](file:///Users/MacBook/Fun_Project/Fun-Project/zone6)**, th
 
 ### Embedded Model Context Protocol (MCP) Server
 When run via `archgraph mcp`, the binary acts as an MCP server over standard input/output (`stdio`), exposing custom capabilities to AI clients like Cursor, Claude Code, and Gemini CLI:
-* **Exposed Tools:**
-  * `archgraph_audit` — Runs topological audits for cycles and database coupling.
-  * `archgraph_get_diff` — Compares commits for architectural mutations.
-  * `archgraph_suggestions` — Returns concrete refactoring recommendations to break coupling.
-  * `archgraph_blast_radius` — Analyzes impact callers of file changes.
-  * `archgraph_ask` — Forwards natural language structural questions to the LLM serving layer.
-  * `archgraph_document` — Generates a master system blueprint markdown document.
-* **Exposed Resources:**
-  * `archgraph://schema` — Details target entity and relationship definitions.
-  * `archgraph://health/summary` — Returns real-time counts of nodes, relationships, cycles, and smells.
-  * `archgraph://drift/log` — Streams recent evolution logs.
+#### Exposed Tools
+
+| Tool | Description |
+|------|-------------|
+| `archgraph_audit` | Runs topological audits for cycles and database coupling. |
+| `archgraph_get_diff` | Compares commits for architectural mutations. |
+| `archgraph_suggestions` | Returns concrete refactoring recommendations to break coupling. |
+| `archgraph_blast_radius` | Analyzes impact callers of file changes. |
+| `archgraph_ask` | Forwards natural language structural questions to the LLM serving layer. |
+| `archgraph_document` | Generates a master system blueprint markdown document. |
+
+#### Exposed Resources
+
+| Resource URI | Description |
+|--------------|-------------|
+| `archgraph://schema` | Details target entity and relationship definitions. |
+| `archgraph://health/summary` | Returns real-time counts of nodes, relationships, cycles, and smells. |
+| `archgraph://drift/log` | Streams recent evolution logs. |
 
 ---
 
