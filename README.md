@@ -121,6 +121,7 @@ The repository is structured as a Go multi-module workspace containing the prima
   * **[Zone 4 Specifications](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/Zone4.md)** | **[Zone 5 Specifications](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/Zone5.md)** | **[Zone 6 Specifications](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/Zone6.md)**
 * **[zone4/](file:///Users/MacBook/Fun_Project/Fun-Project/zone4)** — Zone 4 (Graph Storage) Go module.
 * **[zone5/](file:///Users/MacBook/Fun_Project/Fun-Project/zone5)** — Zone 5 (Intelligence & Serving Layer) Go module.
+* **[zone6/](file:///Users/MacBook/Fun_Project/Fun-Project/zone6)** — Zone 6 (Consumer Interfaces - CLI & MCP Server) Go module.
 
 ---
 
@@ -196,18 +197,51 @@ For more details, see the **[Zone 5 README](file:///Users/MacBook/Fun_Project/Fu
 
 ---
 
-## 🛠️ Testing
+## 🟫 Zone 6 — Consumer Interfaces (CLI & MCP)
 
-Both modules are fully unit-tested. You can run tests for each module individually:
+Located in **[zone6/](file:///Users/MacBook/Fun_Project/Fun-Project/zone6)**, this module contains the user interaction interfaces, acting as both an interactive command-line tool (`archgraph`) and a Model Context Protocol (MCP) server over `stdio`.
 
-**Zone 4 Tests:**
+### Key CLI Subcommands
+* `graph [-format tree|mermaid]` — Visualizes the current codebase dependency tree in the terminal with ANSI colors, or prints copy-pasteable Mermaid flowchart diagrams.
+* `query "<question>"` — Interrogates the codebase architecture in natural language via the serving layer.
+* `diff <commit1> <commit2>` — Detects and lists architectural drift changes between two Git commits.
+* `impact --file <path> [--line <number>]` / `impact <entity_id>` — Traverses downstreams to compute the blast radius of proposed file changes.
+* `validate [--detail]` — Audits system topology (cycles, database couplings, service owners) against boundary rules configured in `.archgraph.yaml`.
+* `document [--out <file>]` — Dynamically auto-generates comprehensive system documentation, automatically reading and hoisting submodule `README.md` files (README-First approach).
+
+### Embedded Model Context Protocol (MCP) Server
+When run via `archgraph mcp`, the binary acts as an MCP server over standard input/output (`stdio`), exposing custom capabilities to AI clients like Cursor, Claude Code, and Gemini CLI:
+* **Exposed Tools:**
+  * `archgraph_audit` — Runs topological audits for cycles and database coupling.
+  * `archgraph_get_diff` — Compares commits for architectural mutations.
+  * `archgraph_suggestions` — Returns concrete refactoring recommendations to break coupling.
+  * `archgraph_blast_radius` — Analyzes impact callers of file changes.
+  * `archgraph_ask` — Forwards natural language structural questions to the LLM serving layer.
+  * `archgraph_document` — Generates a master system blueprint markdown document.
+* **Exposed Resources:**
+  * `archgraph://schema` — Details target entity and relationship definitions.
+  * `archgraph://health/summary` — Returns real-time counts of nodes, relationships, cycles, and smells.
+  * `archgraph://drift/log` — Streams recent evolution logs.
+
+---
+
+## 🛠️ Testing & Compilation
+
+Primary modules are fully testable and compile cleanly:
+
+**Compile Zone 6 CLI:**
 ```bash
-cd zone4
-go test ./...
+cd zone6
+go build -o archgraph ./cmd/archgraph-cli
 ```
 
-**Zone 5 Tests:**
-```bash
-cd zone5
-go test ./...
-```
+**Run Tests:**
+* **Zone 4 Graph Storage:**
+  ```bash
+  cd zone4 && go test ./...
+  ```
+* **Zone 5 Intelligence Layer:**
+  ```bash
+  cd zone5 && go test ./...
+  ```
+
