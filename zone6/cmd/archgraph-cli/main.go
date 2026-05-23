@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -13,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -194,6 +197,10 @@ func main() {
 		handleValidate(ctx, *zone4Addr, *zone5Addr, cfg, subArgs)
 	case "graph":
 		handleGraph(ctx, *zone4Addr, cfg.Namespace, subArgs)
+	case "document":
+		handleDocument(ctx, *zone4Addr, *zone5Addr, cfg, subArgs)
+	case "mcp":
+		handleMCP(ctx, *zone4Addr, *zone5Addr, cfg.Namespace)
 	default:
 		fmt.Printf("Unknown subcommand: %s\n", subcommand)
 		printUsage()
@@ -214,6 +221,8 @@ func printUsage() {
 	fmt.Println("  impact --file <path> [--line <num>] Calculate blast radius of a file or code block")
 	fmt.Println("  impact <entity_id>                  Calculate blast radius of a canonical entity ID")
 	fmt.Println("  validate [--detail]                  Validate codebase structures against governance rules")
+	fmt.Println("  document [--out <file>]             Generate markdown documentation for the codebase")
+	fmt.Println("  mcp                                 Run as a Model Context Protocol (MCP) server over stdio")
 }
 
 func loadConfig(path string) (*Config, error) {
@@ -884,4 +893,1143 @@ func printNodeTree(n *Entity, entMap map[string]*Entity, outRels map[string][]*R
 
 		printNodeTree(target, entMap, outRels, newVisited, depth+1, nextPrintPrefix, nextChildPrefix)
 	}
+}
+
+// MCP JSON-RPC 2.0 Types
+type JSONRPCRequest struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      any             `json:"id,omitempty"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params,omitempty"`
+}
+
+type JSONRPCResponse struct {
+	JSONRPC string `json:"jsonrpc"`
+	ID      any    `json:"id"`
+	Result  any    `json:"result,omitempty"`
+	Error   *Error `json:"error,omitempty"`
+}
+
+type Error struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+type InitializeResult struct {
+	ProtocolVersion string             `json:"protocolVersion"`
+	Capabilities    ServerCapabilities `json:"capabilities"`
+	ServerInfo      ServerInfo         `json:"serverInfo"`
+}
+
+type ServerCapabilities struct {
+	Tools     struct{} `json:"tools"`
+	Resources struct{} `json:"resources"`
+}
+
+type ServerInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+type ToolsListResult struct {
+	Tools []MCPTool `json:"tools"`
+}
+
+type MCPTool struct {
+	Name        string     `json:"name"`
+	Description string     `json:"description"`
+	InputSchema JSONSchema `json:"inputSchema"`
+}
+
+type JSONSchema struct {
+	Type       string                `json:"type"`
+	Properties map[string]SchemaProp `json:"properties"`
+	Required   []string              `json:"required,omitempty"`
+}
+
+type SchemaProp struct {
+	Type        string `json:"type"`
+	Description string `json:"description"`
+}
+
+type ToolCallResult struct {
+	Content []ToolContent `json:"content"`
+	IsError bool          `json:"isError,omitempty"`
+}
+
+type ToolContent struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+type ResourcesListResult struct {
+	Resources []MCPResource `json:"resources"`
+}
+
+type MCPResource struct {
+	URI         string `json:"uri"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	MimeType    string `json:"mimeType,omitempty"`
+}
+
+type ResourceReadResult struct {
+	Contents []ResourceContent `json:"contents"`
+}
+
+type ResourceContent struct {
+	URI      string `json:"uri"`
+	MimeType string `json:"mimeType,omitempty"`
+	Text     string `json:"text"`
+}
+
+var mcpWriteMu sync.Mutex
+
+func sendResult(id any, result any) {
+	mcpWriteMu.Lock()
+	defer mcpWriteMu.Unlock()
+	resp := JSONRPCResponse{
+		JSONRPC: "2.0",
+		ID:      id,
+		Result:  result,
+	}
+	_ = json.NewEncoder(os.Stdout).Encode(resp)
+}
+
+func sendError(id any, code int, message string, data any) {
+	mcpWriteMu.Lock()
+	defer mcpWriteMu.Unlock()
+	resp := JSONRPCResponse{
+		JSONRPC: "2.0",
+		ID:      id,
+		Error: &Error{
+			Code:    code,
+			Message: message,
+		},
+	}
+	_ = json.NewEncoder(os.Stdout).Encode(resp)
+}
+
+func handleMCP(ctx context.Context, zone4Addr, zone5Addr, defaultNamespace string) {
+	// Redirect any standard logging to stderr so we do not pollute stdout
+	logFile := os.Stderr
+	fmt.Fprintln(logFile, "Starting ArchGraph MCP server on stdio...")
+
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+
+		var req JSONRPCRequest
+		if err := json.Unmarshal(line, &req); err != nil {
+			sendError(nil, -32700, "Parse error", nil)
+			continue
+		}
+
+		go handleRequest(ctx, zone4Addr, zone5Addr, defaultNamespace, req)
+	}
+}
+
+func handleRequest(ctx context.Context, zone4Addr, zone5Addr, defaultNamespace string, req JSONRPCRequest) {
+	switch req.Method {
+	case "initialize":
+		res := InitializeResult{
+			ProtocolVersion: "2024-11-05",
+			Capabilities:    ServerCapabilities{},
+			ServerInfo: ServerInfo{
+				Name:    "archgraph",
+				Version: "1.0",
+			},
+		}
+		sendResult(req.ID, res)
+
+	case "notifications/initialized":
+		// no-op
+
+	case "tools/list":
+		res := ToolsListResult{
+			Tools: []MCPTool{
+				{
+					Name:        "archgraph_audit",
+					Description: "Audit codebase topology for dependency cycle loops, supernodes, and database coupling.",
+					InputSchema: JSONSchema{
+						Type: "object",
+						Properties: map[string]SchemaProp{
+							"namespace": {Type: "string", Description: "Namespace of the codebase to audit (defaults to configuration namespace)."},
+						},
+					},
+				},
+				{
+					Name:        "archgraph_get_diff",
+					Description: "Compare architectural changes between two Git commits/references.",
+					InputSchema: JSONSchema{
+						Type: "object",
+						Properties: map[string]SchemaProp{
+							"referenceA": {Type: "string", Description: "First Git commit SHA or branch name."},
+							"referenceB": {Type: "string", Description: "Second Git commit SHA or branch name."},
+							"namespace":  {Type: "string", Description: "Namespace of the codebase."},
+						},
+						Required: []string{"referenceA", "referenceB", "namespace"},
+					},
+				},
+				{
+					Name:        "archgraph_suggestions",
+					Description: "Generate architectural refactoring recommendations based on smells in the codebase.",
+					InputSchema: JSONSchema{
+						Type: "object",
+						Properties: map[string]SchemaProp{
+							"namespace": {Type: "string", Description: "Namespace of the codebase."},
+						},
+						Required: []string{"namespace"},
+					},
+				},
+				{
+					Name:        "archgraph_blast_radius",
+					Description: "Calculate downstream impact of a file or entity change.",
+					InputSchema: JSONSchema{
+						Type: "object",
+						Properties: map[string]SchemaProp{
+							"file":      {Type: "string", Description: "File path to analyze (optional)."},
+							"line":      {Type: "integer", Description: "Line number within the file to analyze (optional)."},
+							"entityId":  {Type: "string", Description: "Canonical entity ID (optional)."},
+							"namespace": {Type: "string", Description: "Namespace of the codebase."},
+						},
+						Required: []string{"namespace"},
+					},
+				},
+				{
+					Name:        "archgraph_ask",
+					Description: "Submit a natural-language structural/architectural question to the Serving Layer.",
+					InputSchema: JSONSchema{
+						Type: "object",
+						Properties: map[string]SchemaProp{
+							"question":  {Type: "string", Description: "The architectural question (e.g. 'Are there database couplings?')."},
+							"namespace": {Type: "string", Description: "Namespace of the codebase."},
+						},
+						Required: []string{"question", "namespace"},
+					},
+				},
+				{
+					Name:        "archgraph_document",
+					Description: "Generate structured markdown documentation for the codebase using the knowledge graph.",
+					InputSchema: JSONSchema{
+						Type: "object",
+						Properties: map[string]SchemaProp{
+							"namespace": {Type: "string", Description: "Namespace of the codebase to document (defaults to configuration namespace)."},
+						},
+					},
+				},
+			},
+		}
+		sendResult(req.ID, res)
+
+	case "tools/call":
+		var params struct {
+			Name      string          `json:"name"`
+			Arguments json.RawMessage `json:"arguments"`
+		}
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			sendError(req.ID, -32602, "Invalid params", nil)
+			return
+		}
+		
+		res, err := callTool(ctx, zone4Addr, zone5Addr, defaultNamespace, params.Name, params.Arguments)
+		if err != nil {
+			sendResult(req.ID, ToolCallResult{
+				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("Error: %v", err)}},
+				IsError: true,
+			})
+		} else {
+			sendResult(req.ID, res)
+		}
+
+	case "resources/list":
+		res := ResourcesListResult{
+			Resources: []MCPResource{
+				{URI: "archgraph://schema", Name: "NIF Schema Definition", Description: "Supported entity and relationship types", MimeType: "text/plain"},
+				{URI: "archgraph://health/summary", Name: "Namespace Health Summary", Description: "Tally of active graph elements and detected smells", MimeType: "text/plain"},
+				{URI: "archgraph://drift/log", Name: "Delta Log Activity", Description: "Activity sequence feed", MimeType: "text/plain"},
+			},
+		}
+		sendResult(req.ID, res)
+
+	case "resources/read":
+		var params struct {
+			URI string `json:"uri"`
+		}
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			sendError(req.ID, -32602, "Invalid params", nil)
+			return
+		}
+		
+		res, err := readResource(ctx, zone4Addr, zone5Addr, defaultNamespace, params.URI)
+		if err != nil {
+			sendError(req.ID, -32603, err.Error(), nil)
+		} else {
+			sendResult(req.ID, res)
+		}
+
+	default:
+		sendError(req.ID, -32601, "Method not found", nil)
+	}
+}
+
+func callTool(ctx context.Context, zone4Addr, zone5Addr, defaultNamespace string, name string, args json.RawMessage) (*ToolCallResult, error) {
+	switch name {
+	case "archgraph_audit":
+		var m struct {
+			Namespace string `json:"namespace"`
+		}
+		_ = json.Unmarshal(args, &m)
+		ns := m.Namespace
+		if ns == "" {
+			ns = defaultNamespace
+		}
+		
+		reqBody, _ := json.Marshal(map[string]string{"namespace": ns})
+		resp, err := postJSON(ctx, zone5Addr+"/v1/health-audit", reqBody)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		
+		var hr HealthReport
+		if err := json.NewDecoder(resp.Body).Decode(&hr); err != nil {
+			return nil, err
+		}
+		
+		var b bytes.Buffer
+		fmt.Fprintf(&b, "🏥 Health Audit for Namespace: %s\n", hr.Namespace)
+		fmt.Fprintf(&b, "Summary: Nodes=%d, Edges=%d, Cycles=%d, Supernodes=%d\n\n",
+			hr.Summary.Entities, hr.Summary.Relationships, hr.Summary.CyclesFound, hr.Summary.Supernodes)
+		if len(hr.Smells) > 0 {
+			fmt.Fprintln(&b, "Detected Smells:")
+			for _, s := range hr.Smells {
+				fmt.Fprintf(&b, "  - [%s] %s: %s (Nodes: %v)\n", s.Severity, s.Type, s.Message, s.Nodes)
+			}
+		} else {
+			fmt.Fprintln(&b, "✅ No smells detected.")
+		}
+		
+		return &ToolCallResult{Content: []ToolContent{{Type: "text", Text: b.String()}}}, nil
+
+	case "archgraph_get_diff":
+		var m struct {
+			ReferenceA string `json:"referenceA"`
+			ReferenceB string `json:"referenceB"`
+			Namespace  string `json:"namespace"`
+		}
+		if err := json.Unmarshal(args, &m); err != nil {
+			return nil, err
+		}
+		ns := m.Namespace
+		if ns == "" {
+			ns = defaultNamespace
+		}
+		
+		tA, err := getCommitTime(m.ReferenceA)
+		if err != nil {
+			return nil, fmt.Errorf("resolve refA: %w", err)
+		}
+		tB, err := getCommitTime(m.ReferenceB)
+		if err != nil {
+			return nil, fmt.Errorf("resolve refB: %w", err)
+		}
+		
+		reqBody, _ := json.Marshal(map[string]any{
+			"namespace": ns,
+			"from":      tA,
+			"to":        tB,
+		})
+		resp, err := postJSON(ctx, zone5Addr+"/v1/diff", reqBody)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		
+		var evo Evolution
+		if err := json.NewDecoder(resp.Body).Decode(&evo); err != nil {
+			return nil, err
+		}
+		
+		var b bytes.Buffer
+		fmt.Fprintf(&b, "🔄 Architecture Diff [%s ➔ %s]\n", m.ReferenceA, m.ReferenceB)
+		fmt.Fprintf(&b, "Time Range: %s to %s\n\n", evo.From.Format(time.RFC3339), evo.To.Format(time.RFC3339))
+		fmt.Fprintf(&b, "Nodes Added: %d, Removed: %d, Updated: %d\n", evo.DiffSummary.NodesAdded, evo.DiffSummary.NodesRemoved, evo.DiffSummary.NodesUpdated)
+		fmt.Fprintf(&b, "Edges Added: %d, Removed: %d, Modified: %d\n", evo.DiffSummary.EdgesAdded, evo.DiffSummary.EdgesRemoved, evo.DiffSummary.EdgesModified)
+		
+		if len(evo.DriftAlerts) > 0 {
+			fmt.Fprintln(&b, "\nDrift Alerts:")
+			for _, alert := range evo.DriftAlerts {
+				fmt.Fprintf(&b, "  - [%s] %s (Entity ID: %s)\n", alert.Severity, alert.Message, alert.EntityID)
+			}
+		}
+		
+		return &ToolCallResult{Content: []ToolContent{{Type: "text", Text: b.String()}}}, nil
+
+	case "archgraph_suggestions":
+		var m struct {
+			Namespace string `json:"namespace"`
+		}
+		_ = json.Unmarshal(args, &m)
+		ns := m.Namespace
+		if ns == "" {
+			ns = defaultNamespace
+		}
+		
+		reqBody, _ := json.Marshal(map[string]string{"namespace": ns})
+		resp, err := postJSON(ctx, zone5Addr+"/v1/health-audit", reqBody)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		
+		var hr HealthReport
+		if err := json.NewDecoder(resp.Body).Decode(&hr); err != nil {
+			return nil, err
+		}
+		
+		var suggestions []string
+		for _, s := range hr.Smells {
+			switch s.Type {
+			case "circular_dependency":
+				suggestions = append(suggestions, fmt.Sprintf("- **Break circular coupling**: A dependency cycle of size %d exists between nodes %v. Refactor these to move shared logic to a common helper module or use event-based decoupling.", len(s.Nodes), s.Nodes))
+			case "shared_database_coupling":
+				suggestions = append(suggestions, fmt.Sprintf("- **Isolate database access**: Multiple services %v are accessing database table %s. To satisfy microservice boundary isolation, wrap database queries in a single owning service and expose APIs for others.", s.Nodes[1:], s.Nodes[0]))
+			case "supernode":
+				suggestions = append(suggestions, fmt.Sprintf("- **Decouple bottleneck supernode**: The node %v has excessively high degree. Consider dividing its responsibilities or introducing caching/queues.", s.Nodes))
+			}
+		}
+		
+		entities, err := fetchAllEntities(ctx, zone4Addr, ns)
+		if err == nil {
+			for _, e := range entities {
+				if e.Type == "SERVICE" {
+					owner, ok1 := e.Properties["owner"]
+					pOwner, ok2 := e.Properties["primary_owner"]
+					missing := true
+					if ok1 {
+						if s, ok := owner.(string); ok && s != "" {
+							missing = false
+						}
+					}
+					if ok2 && missing {
+						if m, ok := pOwner.(map[string]any); ok {
+							if s, ok := m["team_name"].(string); ok && s != "" {
+								missing = false
+							}
+						}
+					}
+					if missing {
+						suggestions = append(suggestions, fmt.Sprintf("- **Assign owner**: Service `%s` has no declared owner. Update its metadata in code configuration to assign an owner team.", e.CanonicalName))
+					}
+				}
+			}
+		}
+		
+		var b bytes.Buffer
+		fmt.Fprintf(&b, "💡 Refactoring Suggestions for Namespace: %s\n\n", ns)
+		if len(suggestions) > 0 {
+			for _, s := range suggestions {
+				fmt.Fprintln(&b, s)
+			}
+		} else {
+			fmt.Fprintln(&b, "✅ Codebase is in excellent architectural health! No recommendations needed.")
+		}
+		
+		return &ToolCallResult{Content: []ToolContent{{Type: "text", Text: b.String()}}}, nil
+
+	case "archgraph_blast_radius":
+		var m struct {
+			File      string `json:"file"`
+			Line      int    `json:"line"`
+			EntityID  string `json:"entityId"`
+			Namespace string `json:"namespace"`
+		}
+		if err := json.Unmarshal(args, &m); err != nil {
+			return nil, err
+		}
+		ns := m.Namespace
+		if ns == "" {
+			ns = defaultNamespace
+		}
+		
+		entityID := m.EntityID
+		if entityID == "" && m.File != "" {
+			resolved, err := findEntityByFileAndLine(ctx, zone4Addr, ns, m.File, m.Line)
+			if err != nil {
+				return nil, err
+			}
+			entityID = resolved
+		}
+		
+		if entityID == "" {
+			return nil, errors.New("must supply entityId or file path")
+		}
+		
+		reqBody, _ := json.Marshal(map[string]any{
+			"entity_id": entityID,
+			"max_depth": 3,
+		})
+		resp, err := postJSON(ctx, zone5Addr+"/v1/blast-radius", reqBody)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		
+		var br BlastRadius
+		if err := json.NewDecoder(resp.Body).Decode(&br); err != nil {
+			return nil, err
+		}
+		
+		var b bytes.Buffer
+		fmt.Fprintf(&b, "🛡️ Blast Radius Report for: %s (Type: %s)\n\n", br.Origin.CanonicalName, br.Origin.Type)
+		if len(br.Affected) > 0 {
+			fmt.Fprintln(&b, "Affected Downstream Callers:")
+			for _, n := range br.Affected {
+				fmt.Fprintf(&b, "  - %s (Type: %s, Depth: %d, Probability: %.1f%%)\n", n.CanonicalName, n.Type, n.Depth, n.ImpactProbability*100)
+			}
+		} else {
+			fmt.Fprintln(&b, "No downstream caller is affected.")
+		}
+		
+		return &ToolCallResult{Content: []ToolContent{{Type: "text", Text: b.String()}}}, nil
+
+	case "archgraph_ask":
+		var m struct {
+			Question  string `json:"question"`
+			Namespace string `json:"namespace"`
+		}
+		if err := json.Unmarshal(args, &m); err != nil {
+			return nil, err
+		}
+		ns := m.Namespace
+		if ns == "" {
+			ns = defaultNamespace
+		}
+		
+		reqBody, _ := json.Marshal(AskReq{
+			Question:  m.Question,
+			Namespace: ns,
+		})
+		resp, err := postJSON(ctx, zone5Addr+"/v1/ask", reqBody)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		
+		var askResp AskResp
+		if err := json.NewDecoder(resp.Body).Decode(&askResp); err != nil {
+			return nil, err
+		}
+		
+		text := "No answer was returned."
+		if askResp.Answer != nil {
+			text = askResp.Answer.Text
+		}
+		
+		return &ToolCallResult{Content: []ToolContent{{Type: "text", Text: text}}}, nil
+
+	case "archgraph_document":
+		var m struct {
+			Namespace string `json:"namespace"`
+		}
+		_ = json.Unmarshal(args, &m)
+		ns := m.Namespace
+		if ns == "" {
+			ns = defaultNamespace
+		}
+
+		docText, err := generateDocumentation(ctx, zone4Addr, zone5Addr, ns)
+		if err != nil {
+			return nil, err
+		}
+		return &ToolCallResult{Content: []ToolContent{{Type: "text", Text: docText}}}, nil
+
+	default:
+		return nil, fmt.Errorf("unknown tool %s", name)
+	}
+}
+
+func readResource(ctx context.Context, zone4Addr, zone5Addr, defaultNamespace string, uri string) (*ResourceReadResult, error) {
+	switch uri {
+	case "archgraph://schema":
+		schemaText := `Entities:
+  SERVICE               - A microservice or web backend.
+  DATABASE_TABLE        - A relational database table.
+  TEAM                  - An organizational owning unit.
+  FILE                  - Code source files.
+  FUNCTION              - Code function blocks.
+Relationships:
+  CALLS                 - Synchronous runtime call or invocation.
+  READS_FROM / WRITES_TO - Database read/write queries.
+  CHANGE_COUPLED_WITH   - Implicitly coupled database resources.
+  DEPENDS_ON            - Structural dependencies.`
+		return &ResourceReadResult{
+			Contents: []ResourceContent{
+				{URI: uri, MimeType: "text/plain", Text: schemaText},
+			},
+		}, nil
+
+	case "archgraph://health/summary":
+		reqBody, _ := json.Marshal(map[string]string{"namespace": defaultNamespace})
+		resp, err := postJSON(ctx, zone5Addr+"/v1/health-audit", reqBody)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		
+		var hr HealthReport
+		if err := json.NewDecoder(resp.Body).Decode(&hr); err != nil {
+			return nil, err
+		}
+		
+		summaryText := fmt.Sprintf("Namespace: %s\nTotal Nodes: %d\nTotal Edges: %d\nCircular Cycles Detected: %d\nBottleneck Supernodes: %d",
+			hr.Namespace, hr.Summary.Entities, hr.Summary.Relationships, hr.Summary.CyclesFound, hr.Summary.Supernodes)
+		return &ResourceReadResult{
+			Contents: []ResourceContent{
+				{URI: uri, MimeType: "text/plain", Text: summaryText},
+			},
+		}, nil
+
+	case "archgraph://drift/log":
+		resp, err := http.Get(zone4Addr + "/v1/log?limit=20")
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		
+		body, _ := io.ReadAll(resp.Body)
+		return &ResourceReadResult{
+			Contents: []ResourceContent{
+				{URI: uri, MimeType: "text/plain", Text: string(body)},
+			},
+		}, nil
+
+	default:
+		return nil, fmt.Errorf("unknown resource %s", uri)
+	}
+}
+
+func handleDocument(ctx context.Context, zone4Addr, zone5Addr string, cfg *Config, args []string) {
+	var outPath string
+	fs := flag.NewFlagSet("document", flag.ExitOnError)
+	fs.StringVar(&outPath, "out", "", "Path to write the markdown documentation")
+	_ = fs.Parse(args)
+
+	doc, err := generateDocumentation(ctx, zone4Addr, zone5Addr, cfg.Namespace)
+	if err != nil {
+		fmt.Printf("Error generating documentation: %v\n", err)
+		os.Exit(1)
+	}
+
+	if outPath != "" {
+		err := os.WriteFile(outPath, []byte(doc), 0644)
+		if err != nil {
+			fmt.Printf("Error writing documentation to %s: %v\n", outPath, err)
+			os.Exit(1)
+		}
+		fmt.Printf("✅ Documentation successfully written to %s\n", outPath)
+	} else {
+		fmt.Println(doc)
+	}
+}
+
+func findWorkspaceRoot() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	for {
+		candidate := filepath.Join(dir, ".archgraph.yaml")
+		if _, err := os.Stat(candidate); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	d, _ := os.Getwd()
+	return d
+}
+
+func generateDirTree(dirPath string, prefix string) string {
+	var sb strings.Builder
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return ""
+	}
+
+	var filtered []os.DirEntry
+	for _, entry := range entries {
+		name := entry.Name()
+		if name == ".git" || name == "node_modules" || name == "vendor" || name == "bin" || name == ".gemini" || strings.HasPrefix(name, ".") {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+
+	for i, entry := range filtered {
+		isLast := (i == len(filtered)-1)
+		var connector string
+		if isLast {
+			connector = "└── "
+		} else {
+			connector = "├── "
+		}
+
+		sb.WriteString(prefix + connector + entry.Name() + "\n")
+
+		if entry.IsDir() {
+			var newPrefix string
+			if isLast {
+				newPrefix = prefix + "    "
+			} else {
+				newPrefix = prefix + "│   "
+			}
+			sb.WriteString(generateDirTree(filepath.Join(dirPath, entry.Name()), newPrefix))
+		}
+	}
+	return sb.String()
+}
+
+func hoistREADME(entityPath string) string {
+	if entityPath == "" {
+		return ""
+	}
+	dir := filepath.Dir(entityPath)
+	candidates := []string{
+		filepath.Join(dir, "README.md"),
+		filepath.Join(dir, "readme.md"),
+		filepath.Join(dir, "README"),
+	}
+	for _, cand := range candidates {
+		if data, err := os.ReadFile(cand); err == nil {
+			content := string(data)
+			lines := strings.Split(content, "\n")
+			if len(lines) > 25 {
+				return strings.Join(lines[:25], "\n") + "\n\n*(Truncated. Read full description in " + cand + ")*"
+			}
+			return content
+		}
+	}
+	return ""
+}
+
+func getExecutiveSummary(ctx context.Context, zone5Addr, namespace string, entities []*Entity, relationships []*Relationship) string {
+	reqBody, _ := json.Marshal(AskReq{
+		Question:  fmt.Sprintf("Summarize the architecture of namespace %s in 3 sentences.", namespace),
+		Namespace: namespace,
+	})
+	
+	client := &http.Client{Timeout: 3 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, zone5Addr+"/v1/ask", bytes.NewReader(reqBody))
+	if err == nil {
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := client.Do(req)
+		if err == nil {
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				var askResp AskResp
+				if json.NewDecoder(resp.Body).Decode(&askResp) == nil && askResp.Answer != nil && askResp.Answer.Text != "" && !strings.Contains(askResp.Answer.Text, "No answer") {
+					return askResp.Answer.Text
+				}
+			}
+		}
+	}
+
+	services := 0
+	dbs := 0
+	for _, e := range entities {
+		if e.Type == "SERVICE" {
+			services++
+		} else if e.Type == "DATABASE_TABLE" {
+			dbs++
+		}
+	}
+	return fmt.Sprintf("The %s system is a microservices-based application containing %d services and %d database tables. The primary entry points coordinate downstream service invocations and database access. The network graph consists of %d entities and %d relationships, reflecting decoupled database operations and service communications.",
+		namespace, services, dbs, len(entities), len(relationships))
+}
+
+func computeLocalBlastRadius(startID string, entities []*Entity, outRels map[string][]*Relationship, inRels map[string][]*Relationship) ([]string, float64) {
+	queue := []string{startID}
+	visited := map[string]bool{startID: true}
+	depthMap := map[string]int{startID: 0}
+	
+	var affected []string
+	for len(queue) > 0 {
+		curr := queue[0]
+		queue = queue[1:]
+		
+		currDepth := depthMap[curr]
+		if currDepth >= 3 {
+			continue
+		}
+		
+		for _, rel := range inRels[curr] {
+			parentID := rel.FromID
+			if !visited[parentID] {
+				visited[parentID] = true
+				depthMap[parentID] = currDepth + 1
+				queue = append(queue, parentID)
+				affected = append(affected, parentID)
+			}
+		}
+	}
+	
+	total := len(entities)
+	percentage := 0.0
+	if total > 1 {
+		percentage = (float64(len(affected)) / float64(total - 1)) * 100.0
+	}
+	return affected, percentage
+}
+
+func generateDocumentation(ctx context.Context, zone4Addr, zone5Addr, namespace string) (string, error) {
+	listing, err := fetchNamespaceListing(ctx, zone4Addr, namespace)
+	if err != nil {
+		return "", fmt.Errorf("fetch namespace: %w", err)
+	}
+
+	reqBody, _ := json.Marshal(map[string]string{"namespace": namespace})
+	resp, err := postJSON(ctx, zone5Addr+"/v1/health-audit", reqBody)
+	var healthReport HealthReport
+	if err == nil {
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			_ = json.NewDecoder(resp.Body).Decode(&healthReport)
+		}
+	}
+
+	inDegree := make(map[string]int)
+	outDegree := make(map[string]int)
+	inRels := make(map[string][]*Relationship)
+	outRels := make(map[string][]*Relationship)
+	for _, r := range listing.Relationships {
+		outDegree[r.FromID]++
+		inDegree[r.ToID]++
+		inRels[r.ToID] = append(inRels[r.ToID], r)
+		outRels[r.FromID] = append(outRels[r.FromID], r)
+	}
+
+	entMap := make(map[string]*Entity)
+	for _, e := range listing.Entities {
+		entMap[e.ID] = e
+	}
+
+	var entryPoints []*Entity
+	for _, e := range listing.Entities {
+		if e.Type == "SERVICE" {
+			hasInboundCall := false
+			for _, rel := range inRels[e.ID] {
+				if rel.Type == "CALLS" {
+					hasInboundCall = true
+					break
+				}
+			}
+			if !hasInboundCall {
+				entryPoints = append(entryPoints, e)
+			}
+		}
+	}
+
+	var orphans []*Entity
+	for _, e := range listing.Entities {
+		if e.Type != "SERVICE" && inDegree[e.ID] == 0 {
+			orphans = append(orphans, e)
+		}
+	}
+
+	execSummary := getExecutiveSummary(ctx, zone5Addr, namespace, listing.Entities, listing.Relationships)
+	wsRoot := findWorkspaceRoot()
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("# 🏗️  System Architecture Blueprint: %s\n\n", namespace))
+
+	sb.WriteString("## 📊 Project Metadata & Graph Health\n")
+	sb.WriteString(fmt.Sprintf("- **Namespace:** `%s`\n", namespace))
+	sb.WriteString(fmt.Sprintf("- **Workspace Directory:** `%s`\n", wsRoot))
+	sb.WriteString(fmt.Sprintf("- **Total Registered Entities:** %d\n", len(listing.Entities)))
+	sb.WriteString(fmt.Sprintf("- **Active Relationships:** %d\n", len(listing.Relationships)))
+	if healthReport.Summary.Entities > 0 {
+		sb.WriteString(fmt.Sprintf("- **Dependency Cycles Found:** %d\n", healthReport.Summary.CyclesFound))
+		sb.WriteString(fmt.Sprintf("- **Detected Architectural Smells:** %d\n", len(healthReport.Smells)))
+	} else {
+		sb.WriteString("- **Dependency Cycles Found:** 0\n")
+		sb.WriteString("- **Detected Architectural Smells:** 0\n")
+	}
+	sb.WriteString("\n")
+
+	sb.WriteString("## 📝 Executive Summary\n")
+	sb.WriteString(execSummary + "\n\n")
+
+	sb.WriteString("## 🚪 Entry Points\n")
+	if len(entryPoints) > 0 {
+		sb.WriteString("The following services act as system entry points (having no inbound callers):\n")
+		for _, ep := range entryPoints {
+			pathStr := ep.Properties["path"]
+			if pathStr == nil {
+				pathStr = ep.Source.SourceRef
+			}
+			sb.WriteString(fmt.Sprintf("- **%s** (Type: `%s`, Source: `%v`)\n", ep.CanonicalName, ep.Type, pathStr))
+		}
+	} else {
+		sb.WriteString("No entry points detected (all services have inbound call relationships).\n")
+	}
+	sb.WriteString("\n")
+
+	sb.WriteString("## 📁 Codebase Directory Structure\n")
+	sb.WriteString("```\n")
+	sb.WriteString(filepath.Base(wsRoot) + "/\n")
+	sb.WriteString(generateDirTree(wsRoot, ""))
+	sb.WriteString("```\n\n")
+
+	sb.WriteString("## 🗺️  Detailed Module Breakdown\n")
+	for _, e := range listing.Entities {
+		sb.WriteString(fmt.Sprintf("### 📦 %s (`%s`)\n", e.CanonicalName, e.Type))
+		
+		purpose := "No purpose declared."
+		if desc, ok := e.Properties["description"].(string); ok && desc != "" {
+			purpose = desc
+		} else if e.Type == "SERVICE" {
+			purpose = fmt.Sprintf("Microservice coordinating %s operations.", e.CanonicalName)
+		} else if e.Type == "DATABASE_TABLE" {
+			purpose = fmt.Sprintf("Relational database table storing raw %s data.", e.CanonicalName)
+		}
+		sb.WriteString(fmt.Sprintf("- **Purpose:** %s\n", purpose))
+
+		owner := "Unassigned"
+		if o, ok := e.Properties["owner"].(string); ok && o != "" {
+			owner = o
+		}
+		sb.WriteString(fmt.Sprintf("- **Owner:** %s\n", owner))
+
+		pathStr := e.Properties["path"]
+		if pathStr == nil {
+			pathStr = e.Source.SourceRef
+		}
+		if pathStr != "" {
+			sb.WriteString(fmt.Sprintf("- **Source Path:** `%v`\n", pathStr))
+		}
+
+		outEdges := outRels[e.ID]
+		if len(outEdges) > 0 {
+			sb.WriteString("- **Key Outbound Dependencies:**\n")
+			for _, edge := range outEdges {
+				targetNode, ok := entMap[edge.ToID]
+				targetName := edge.ToID
+				if ok {
+					targetName = targetNode.CanonicalName
+				}
+				sb.WriteString(fmt.Sprintf("  - `-- (%s) -->` **%s**\n", edge.Type, targetName))
+			}
+		}
+		
+		if pStr, ok := pathStr.(string); ok && pStr != "" {
+			fullPath := filepath.Join(wsRoot, pStr)
+			readmeContent := hoistREADME(fullPath)
+			if readmeContent != "" {
+				sb.WriteString("\n#### Hoisted Submodule Documentation:\n")
+				sb.WriteString(readmeContent + "\n")
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("## ⚡ Component API Reference & Contracts\n")
+	sb.WriteString("This section documents the operations and contracts registered across components.\n\n")
+	
+	hasContracts := false
+	for _, e := range listing.Entities {
+		if e.Type == "SERVICE" {
+			dbReads := []string{}
+			dbWrites := []string{}
+			calls := []string{}
+			
+			for _, edge := range outRels[e.ID] {
+				target, ok := entMap[edge.ToID]
+				if !ok {
+					continue
+				}
+				if target.Type == "DATABASE_TABLE" {
+					if edge.Type == "READS_FROM" {
+						dbReads = append(dbReads, target.CanonicalName)
+					} else if edge.Type == "WRITES_TO" {
+						dbWrites = append(dbWrites, target.CanonicalName)
+					}
+				} else if edge.Type == "CALLS" {
+					calls = append(calls, target.CanonicalName)
+				}
+			}
+			
+			if len(dbReads) > 0 || len(dbWrites) > 0 || len(calls) > 0 {
+				hasContracts = true
+				sb.WriteString(fmt.Sprintf("### %s API Reference\n", e.CanonicalName))
+				if len(calls) > 0 {
+					sb.WriteString("- **Downstream Service Contracts:**\n")
+					for _, c := range calls {
+						sb.WriteString(fmt.Sprintf("  - Invokes `%s` synchronously over HTTP/gRPC\n", c))
+					}
+				}
+				if len(dbReads) > 0 || len(dbWrites) > 0 {
+					sb.WriteString("- **Database Contracts & Side Effects:**\n")
+					for _, tbl := range dbReads {
+						sb.WriteString(fmt.Sprintf("  - Reads from Table `%s`\n", tbl))
+					}
+					for _, tbl := range dbWrites {
+						sb.WriteString(fmt.Sprintf("  - Writes to Table `%s` (Side Effect: DB Mutation)\n", tbl))
+					}
+				}
+				sb.WriteString("\n")
+			}
+		}
+	}
+	if !hasContracts {
+		sb.WriteString("No component contracts (calls or database operations) are currently tracked.\n\n")
+	}
+
+	sb.WriteString("## 🛡️  Cross-Cutting Concerns\n\n")
+	
+	sb.WriteString("### Authentication & Authorization\n")
+	var authProtected []string
+	for _, e := range listing.Entities {
+		if e.Type == "SERVICE" && e.CanonicalName != "auth-service" {
+			for _, edge := range outRels[e.ID] {
+				target := entMap[edge.ToID]
+				if target != nil && target.CanonicalName == "auth-service" {
+					authProtected = append(authProtected, e.CanonicalName)
+					break
+				}
+			}
+		}
+	}
+	if len(authProtected) > 0 {
+		sb.WriteString("The following services have direct dependency links to `auth-service`, enforcing caller validation:\n")
+		for _, ap := range authProtected {
+			sb.WriteString(fmt.Sprintf("- `%s`\n", ap))
+		}
+	} else {
+		sb.WriteString("No services currently require routing via `auth-service` directly in the dependency graph.\n")
+	}
+	sb.WriteString("\n")
+
+	sb.WriteString("### State Management & Databases\n")
+	var dbs []*Entity
+	for _, e := range listing.Entities {
+		if e.Type == "DATABASE_TABLE" {
+			dbs = append(dbs, e)
+		}
+	}
+	if len(dbs) > 0 {
+		sb.WriteString("The system source-of-truth tables and their controlling services are:\n")
+		for _, db := range dbs {
+			var readers []string
+			var writers []string
+			for _, r := range listing.Relationships {
+				if r.ToID == db.ID {
+					caller := entMap[r.FromID]
+					if caller != nil {
+						if r.Type == "READS_FROM" {
+							readers = append(readers, caller.CanonicalName)
+						} else if r.Type == "WRITES_TO" {
+							writers = append(writers, caller.CanonicalName)
+						}
+					}
+				}
+			}
+			sb.WriteString(fmt.Sprintf("- **Table `%s`**:\n", db.CanonicalName))
+			sb.WriteString(fmt.Sprintf("  - *Writers (Mutators):* %v\n", writers))
+			sb.WriteString(fmt.Sprintf("  - *Readers (Consumers):* %v\n", readers))
+		}
+	} else {
+		sb.WriteString("No shared database nodes registered.\n")
+	}
+	sb.WriteString("\n")
+
+	sb.WriteString("## 🧠  The \"Archigraph\" Special Sauce\n\n")
+
+	sb.WriteString("### Centrality Analysis (Dependency Hubs)\n")
+	sb.WriteString("Centrality highlights \"Hub\" entities that have a high number of inbound or outbound links, marking potential single points of failure:\n\n")
+	
+	type centrality struct {
+		name   string
+		t      string
+		degree int
+		in     int
+		out    int
+	}
+	var cents []centrality
+	for _, e := range listing.Entities {
+		cents = append(cents, centrality{
+			name:   e.CanonicalName,
+			t:      e.Type,
+			degree: inDegree[e.ID] + outDegree[e.ID],
+			in:     inDegree[e.ID],
+			out:    outDegree[e.ID],
+		})
+	}
+	
+	for i := 0; i < len(cents); i++ {
+		for j := i + 1; j < len(cents); j++ {
+			if cents[i].degree < cents[j].degree {
+				cents[i], cents[j] = cents[j], cents[i]
+			}
+		}
+	}
+
+	sb.WriteString("| Entity Name | Entity Type | Degree Centrality (In + Out) | Inbound Links | Outbound Links |\n")
+	sb.WriteString("|-------------|-------------|----------------------------|---------------|----------------|\n")
+	limit := 5
+	if len(cents) < limit {
+		limit = len(cents)
+	}
+	for i := 0; i < limit; i++ {
+		c := cents[i]
+		sb.WriteString(fmt.Sprintf("| **`%s`** | %s | %d | %d | %d |\n", c.name, c.t, c.degree, c.in, c.out))
+	}
+	sb.WriteString("\n")
+
+	sb.WriteString("### Orphan Detection (Potential Dead Code)\n")
+	if len(orphans) > 0 {
+		sb.WriteString("The following static modules or tables are registered in the graph but have zero incoming relationships, which may indicate dead code:\n")
+		for _, o := range orphans {
+			sb.WriteString(fmt.Sprintf("- **`%s`** (Type: `%s`)\n", o.CanonicalName, o.Type))
+		}
+	} else {
+		sb.WriteString("✅ No orphans or dead modules detected. Every entity has inbound references.\n")
+	}
+	sb.WriteString("\n")
+
+	sb.WriteString("### Change Impact Radius\n")
+	sb.WriteString("Computed blast radius showing the percentage of caller systems affected if a module is modified:\n\n")
+	for _, e := range listing.Entities {
+		if e.Type == "SERVICE" {
+			affected, percent := computeLocalBlastRadius(e.ID, listing.Entities, outRels, inRels)
+			affectedNames := []string{}
+			for _, affID := range affected {
+				if node, ok := entMap[affID]; ok {
+					affectedNames = append(affectedNames, "`"+node.CanonicalName+"`")
+				}
+			}
+			sb.WriteString(fmt.Sprintf("- **`%s`**: Impact Radius: **%.1f%%**\n", e.CanonicalName, percent))
+			if len(affectedNames) > 0 {
+				sb.WriteString(fmt.Sprintf("  - *Downstream Callers Affected:* %s\n", strings.Join(affectedNames, ", ")))
+			}
+		}
+	}
+	sb.WriteString("\n")
+
+	sb.WriteString("## 📖  Glossary\n")
+	sb.WriteString("- **SERVICE:** A microservice or web backend performing domain logic.\n")
+	sb.WriteString("- **DATABASE_TABLE:** A relational database table storing schema records.\n")
+	sb.WriteString("- **CALLS:** A runtime dependency indicating synchronous HTTP or RPC call.\n")
+	sb.WriteString("- **READS_FROM:** Data operation reading database records.\n")
+	sb.WriteString("- **WRITES_TO:** Data operation modifying database records.\n")
+	sb.WriteString("- **CHANGE_COUPLED_WITH:** Relationship inferring structural or data coupling from shared resources.\n")
+
+	return sb.String(), nil
 }
