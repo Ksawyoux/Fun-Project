@@ -15,7 +15,9 @@
       "Bash(go build *)",
       "Bash(go test *)",
       "Bash(xargs sed -i '' 's|archgraph/zone2/internal/nif|archgraph/nif|g; s|archgraph/zone3/internal/nif|archgraph/nif|g')",
-      "Bash(make test *)"
+      "Bash(make test *)",
+      "Bash(curl -s \"http://localhost:8080/v1/entities?namespace=acme\")",
+      "Bash(sqlite3 zone4/zone4.db \"SELECT type, canonical_name, namespace FROM entities LIMIT 30\")"
     ]
   },
   "enabledMcpjsonServers": [
