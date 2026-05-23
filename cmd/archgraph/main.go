@@ -36,11 +36,13 @@ import (
 
 func main() {
 	var (
-		rootDir   = flag.String("root", ".", "Project root containing zone4/ and zone5/")
+		rootDir   = flag.String("root", ".", "Project root containing zone3/, zone4/, and zone5/")
 		zone4Port = flag.String("zone4-port", "8080", "Port for zone4d")
+		zone3Port = flag.String("zone3-port", "8082", "Port for zone3d")
 		zone5Port = flag.String("zone5-port", "8081", "Port for zone5d")
 		dbPath    = flag.String("db", "zone4.db", "SQLite database path passed to zone4d")
-		readyWait = flag.Duration("ready-timeout", 30*time.Second, "Time to wait for zone4d to become healthy before giving up")
+		zone3Db   = flag.String("zone3-db", "zone3.db", "SQLite database path passed to zone3d")
+		readyWait = flag.Duration("ready-timeout", 30*time.Second, "Time to wait for zones to become healthy before giving up")
 	)
 	flag.Parse()
 
@@ -48,10 +50,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("resolve root: %v", err)
 	}
+	zone3Dir := filepath.Join(absRoot, "zone3")
 	zone4Dir := filepath.Join(absRoot, "zone4")
 	zone5Dir := filepath.Join(absRoot, "zone5")
-	if !dirExists(zone4Dir) || !dirExists(zone5Dir) {
-		log.Fatalf("expected zone4/ and zone5/ under %s — pass -root if running from elsewhere", absRoot)
+	if !dirExists(zone3Dir) || !dirExists(zone4Dir) || !dirExists(zone5Dir) {
+		log.Fatalf("expected zone3/, zone4/ and zone5/ under %s — pass -root if running from elsewhere", absRoot)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -60,8 +63,10 @@ func main() {
 	var wg sync.WaitGroup
 
 	zone4Addr := ":" + *zone4Port
+	zone3Addr := ":" + *zone3Port
 	zone5Addr := ":" + *zone5Port
 	zone4URL := "http://localhost:" + *zone4Port
+	zone3URL := "http://localhost:" + *zone3Port
 
 	// --- Boot zone4d ---
 	zone4Cmd, err := startZone(ctx, "zone4", zone4Dir, "./cmd/zone4d",
@@ -87,6 +92,33 @@ func main() {
 	}
 	log.Printf("[archgraph] zone4 is healthy at %s", zone4URL)
 
+	// --- Boot zone3d ---
+	zone3Cmd, err := startZone(ctx, "zone3", zone3Dir, "./cmd/zone3d",
+		"-addr", zone3Addr, "-db", *zone3Db, "-zone4", zone4URL)
+	if err != nil {
+		log.Printf("[archgraph] start zone3: %v", err)
+		stop()
+		wg.Wait()
+		os.Exit(1)
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := zone3Cmd.Wait(); err != nil && !isSignalErr(err) {
+			log.Printf("[archgraph] zone3 exited: %v", err)
+			stop() // bring everything down if zone3 dies unexpectedly
+		}
+	}()
+
+	// --- Wait for zone3 health ---
+	if err := waitHealthy(ctx, zone3URL+"/v1/health", *readyWait); err != nil {
+		log.Printf("[archgraph] zone3 never became healthy: %v", err)
+		stop()
+		wg.Wait()
+		os.Exit(1)
+	}
+	log.Printf("[archgraph] zone3 is healthy at %s", zone3URL)
+
 	// --- Boot zone5d ---
 	zone5Cmd, err := startZone(ctx, "zone5", zone5Dir, "./cmd/zone5d",
 		"-addr", zone5Addr, "-zone4", zone4URL)
@@ -104,7 +136,7 @@ func main() {
 		}
 	}()
 
-	log.Printf("[archgraph] all zones up — zone5 on :%s (talks to zone4 at %s)", *zone5Port, zone4URL)
+	log.Printf("[archgraph] all zones up — zone3 on :%s, zone5 on :%s (talks to zone4 at %s)", *zone3Port, *zone5Port, zone4URL)
 
 	// Block until signal or a child dies and triggered stop().
 	<-ctx.Done()
@@ -114,6 +146,9 @@ func main() {
 	// run their own http.Server.Shutdown.
 	if zone5Cmd != nil && zone5Cmd.Process != nil {
 		_ = zone5Cmd.Process.Signal(syscall.SIGTERM)
+	}
+	if zone3Cmd != nil && zone3Cmd.Process != nil {
+		_ = zone3Cmd.Process.Signal(syscall.SIGTERM)
 	}
 	if zone4Cmd != nil && zone4Cmd.Process != nil {
 		_ = zone4Cmd.Process.Signal(syscall.SIGTERM)
@@ -129,6 +164,9 @@ func main() {
 		log.Printf("[archgraph] timed out waiting for shutdown; killing")
 		if zone5Cmd != nil && zone5Cmd.Process != nil {
 			_ = zone5Cmd.Process.Kill()
+		}
+		if zone3Cmd != nil && zone3Cmd.Process != nil {
+			_ = zone3Cmd.Process.Kill()
 		}
 		if zone4Cmd != nil && zone4Cmd.Process != nil {
 			_ = zone4Cmd.Process.Kill()
