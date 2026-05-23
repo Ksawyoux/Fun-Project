@@ -9,6 +9,7 @@ Welcome to the **AI Codebase Knowledge Graph** repository. This project is a sta
 The system is organized into **6 logical zones**, running from signal capture all the way to user interaction interfaces. Here is how they connect:
 
 ```mermaid
+%%{init: {'theme': 'dark'}}%%
 flowchart TD
     subgraph Zone1 ["Zone 1: Signal Sources"]
         Git["Git Repositories"]
@@ -62,15 +63,17 @@ flowchart TD
     QueryEngine & Analytics & LLMReason --> PublicAPI
     PublicAPI --> IDE & WebDash & CLI
 
-    %% Styling
-    style Zone1 fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#0d47a1
-    style Zone2 fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#1b5e20
-    style Zone3 fill:#fffde7,stroke:#fbc02d,stroke-width:2px,color:#f57f17
-    style Zone4 fill:#ffebee,stroke:#c62828,stroke-width:2px,color:#b71c1c
-    style Zone5 fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px,color:#4a148c
-    style Zone6 fill:#efebe9,stroke:#4e342e,stroke-width:2px,color:#3e2723
+    %% Subgraph Styling
+    style Zone1 fill:#162447,stroke:#1f4068,stroke-width:2px,color:#e4e4e4
+    style Zone2 fill:#1b4332,stroke:#2d6a4f,stroke-width:2px,color:#e4e4e4
+    style Zone3 fill:#6f5e13,stroke:#9a7b1c,stroke-width:2px,color:#e4e4e4
+    style Zone4 fill:#5c0c0c,stroke:#7f1d1d,stroke-width:2px,color:#e4e4e4
+    style Zone5 fill:#3b135c,stroke:#521c7d,stroke-width:2px,color:#e4e4e4
+    style Zone6 fill:#2b1d1d,stroke:#3d2b2b,stroke-width:2px,color:#e4e4e4
 
-    classDef default fill:#ffffff,stroke:#333,stroke-width:1px;
+    %% Node Styling Class for Dark Mode Contrast
+    classDef darkNode fill:#1e1e24,stroke:#44444c,stroke-width:1px,color:#ffffff;
+    class Git,AST,APIs,Trace,Metrics,Connectors,Ingestors,NIF,Ledger,Parse,Resolve,Infer,Enrich,Delta,MutationAPI,GraphDB,DeltaLog,QueryEngine,Analytics,LLMReason,PublicAPI,IDE,WebDash,CLI darkNode;
 ```
 
 ---
@@ -80,6 +83,7 @@ flowchart TD
 The sequence below illustrates how a change in the codebase propagates through the architecture to update the serving layer:
 
 ```mermaid
+%%{init: {'theme': 'dark'}}%%
 sequenceDiagram
     autonumber
     actor Dev as Developer / Codebase
