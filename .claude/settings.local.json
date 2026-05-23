@@ -5,7 +5,14 @@
       "Bash(command -v brew)",
       "Bash(brew list *)",
       "Read(//usr/local/go/bin/**)",
-      "Read(//opt/homebrew/bin/**)"
+      "Read(//opt/homebrew/bin/**)",
+      "Bash(command -v cc)",
+      "Bash(cc --version)",
+      "Bash(chmod -R u+w /Users/MacBook/go/pkg/mod/cache/download/modernc.org)",
+      "Bash(chmod -R u+w /Users/MacBook/go/pkg/mod/modernc.org)",
+      "Bash(rm -rf /Users/MacBook/go/pkg/mod/cache/download/modernc.org /Users/MacBook/go/pkg/mod/modernc.org)",
+      "Bash(go mod *)",
+      "Bash(go build *)"
     ]
   },
   "enabledMcpjsonServers": [

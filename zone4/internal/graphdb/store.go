@@ -21,7 +21,7 @@ import (
 
 	"archgraph/zone4/internal/schema"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 //go:embed schema.sql
@@ -37,12 +37,12 @@ type Store struct {
 // Open opens (or creates) the SQLite database at the given path and applies
 // the schema migration. Pass ":memory:" for ephemeral in-process storage.
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	db, err := sql.Open("sqlite3", path)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
-	// modernc.org/sqlite handles concurrent reads fine but a single writer is
-	// the safe default. The mutation API serializes writes anyway.
+	// SQLite handles concurrent reads fine but a single writer is the safe
+	// default. The mutation API serializes writes anyway.
 	db.SetMaxOpenConns(1)
 	if _, err := db.Exec(schemaDDL); err != nil {
 		db.Close()
