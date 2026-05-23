@@ -16,7 +16,7 @@ import (
 	"archgraph/zone2/internal/dlq"
 	"archgraph/zone2/internal/ingestor"
 	"archgraph/zone2/internal/ledger"
-	"archgraph/zone2/internal/nif"
+	"archgraph/nif"
 )
 
 // Runner glues an ingestion run together: fetch → validate → DLQ-on-fail →

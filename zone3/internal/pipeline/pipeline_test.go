@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"archgraph/zone3/internal/nif"
+	"archgraph/nif"
 	"archgraph/zone3/internal/registry"
 	"archgraph/zone3/internal/z4client"
 )

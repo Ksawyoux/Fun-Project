@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"archgraph/zone2/internal/nif"
+	"archgraph/nif"
 )
 
 // FileSink dumps records to JSONL on disk. One file per run for clarity —

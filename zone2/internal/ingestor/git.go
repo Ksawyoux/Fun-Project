@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"archgraph/zone2/internal/nif"
+	"archgraph/nif"
 )
 
 // GitConfig is what one Git source needs to know.

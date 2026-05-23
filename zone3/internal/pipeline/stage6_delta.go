@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"time"
 
-	"archgraph/zone3/internal/nif"
+	"archgraph/nif"
 	"archgraph/zone3/internal/z4client"
 )
 

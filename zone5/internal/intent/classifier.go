@@ -46,7 +46,7 @@ func Classify(question string) Classification {
 	case hasAny(q, "blast radius", "what breaks", "what would break", "impact of", "if i delete", "if we delete", "if i remove"):
 		return Classification{Archetype: ArchImpact, Confidence: 0.9}
 
-	case hasAny(q, "changed", "evolution", "history", "diff", "between commit", "since "):
+	case hasAny(q, "change", "evolution", "history", "diff", "between commit", "since ", "last month", "last week", "past month", "yesterday", " ago"):
 		return Classification{Archetype: ArchTemporal, Confidence: 0.8}
 
 	case hasAny(q, "latency", "slow", "slowest", "p99", "p50", "error rate", "throughput"):

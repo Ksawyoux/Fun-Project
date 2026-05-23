@@ -11,7 +11,7 @@ import (
 	"archgraph/zone2/internal/dlq"
 	"archgraph/zone2/internal/ingestor"
 	"archgraph/zone2/internal/ledger"
-	"archgraph/zone2/internal/nif"
+	"archgraph/nif"
 )
 
 // fakeIngestor lets us script outcomes without touching git or the filesystem.

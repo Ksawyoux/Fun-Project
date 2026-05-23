@@ -3,7 +3,7 @@ package pipeline
 import (
 	"strings"
 
-	"archgraph/zone3/internal/nif"
+	"archgraph/nif"
 )
 
 func (p *Pipeline) stage1ParseAndClassify(e *nif.Entity) (*nif.Entity, error) {

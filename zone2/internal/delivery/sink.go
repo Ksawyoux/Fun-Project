@@ -9,7 +9,7 @@ package delivery
 import (
 	"context"
 
-	"archgraph/zone2/internal/nif"
+	"archgraph/nif"
 )
 
 // PublishResult tells the orchestrator what landed.

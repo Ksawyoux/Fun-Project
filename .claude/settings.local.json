@@ -13,7 +13,8 @@
       "Bash(rm -rf /Users/MacBook/go/pkg/mod/cache/download/modernc.org /Users/MacBook/go/pkg/mod/modernc.org)",
       "Bash(go mod *)",
       "Bash(go build *)",
-      "Bash(go test *)"
+      "Bash(go test *)",
+      "Bash(xargs sed -i '' 's|archgraph/zone2/internal/nif|archgraph/nif|g; s|archgraph/zone3/internal/nif|archgraph/nif|g')"
     ]
   },
   "enabledMcpjsonServers": [

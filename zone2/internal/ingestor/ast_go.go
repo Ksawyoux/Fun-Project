@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"archgraph/zone2/internal/nif"
+	"archgraph/nif"
 )
 
 // GoASTConfig configures one AST ingestor over one (possibly nested) Go

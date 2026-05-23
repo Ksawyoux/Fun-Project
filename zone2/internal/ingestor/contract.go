@@ -12,7 +12,7 @@ import (
 	"context"
 	"time"
 
-	"archgraph/zone2/internal/nif"
+	"archgraph/nif"
 )
 
 // Metadata is the static description an ingestor advertises to the registry.

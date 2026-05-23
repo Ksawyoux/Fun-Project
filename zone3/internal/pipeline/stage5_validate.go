@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"archgraph/zone3/internal/nif"
+	"archgraph/nif"
 )
 
 var (

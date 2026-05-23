@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"archgraph/zone2/internal/nif"
+	"archgraph/nif"
 )
 
 // Zone4Sink ships NIF records to zone4d's POST /v1/mutations endpoint.

@@ -3,7 +3,7 @@ package pipeline
 import (
 	"context"
 
-	"archgraph/zone3/internal/nif"
+	"archgraph/nif"
 )
 
 func (p *Pipeline) stage4EnrichEntity(ctx context.Context, e *nif.Entity, relationships []*nif.Relationship) {

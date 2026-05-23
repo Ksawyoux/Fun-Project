@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"archgraph/zone3/internal/nif"
+	"archgraph/nif"
 )
 
 func (p *Pipeline) stage3InferAndDeduplicate(ctx context.Context, relationships []*nif.Relationship, resolvedEntities []*nif.Entity, idMap map[string]string) ([]*nif.Relationship, error) {

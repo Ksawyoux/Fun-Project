@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"archgraph/zone3/internal/nif"
+	"archgraph/nif"
 	"archgraph/zone3/internal/pipeline"
 	"archgraph/zone3/internal/z4client"
 )
