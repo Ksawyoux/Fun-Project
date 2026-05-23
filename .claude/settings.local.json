@@ -14,7 +14,8 @@
       "Bash(go mod *)",
       "Bash(go build *)",
       "Bash(go test *)",
-      "Bash(xargs sed -i '' 's|archgraph/zone2/internal/nif|archgraph/nif|g; s|archgraph/zone3/internal/nif|archgraph/nif|g')"
+      "Bash(xargs sed -i '' 's|archgraph/zone2/internal/nif|archgraph/nif|g; s|archgraph/zone3/internal/nif|archgraph/nif|g')",
+      "Bash(make test *)"
     ]
   },
   "enabledMcpjsonServers": [

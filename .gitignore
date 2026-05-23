@@ -1,0 +1,14 @@
+# Build artifacts
+zone6/archgraph
+cmd/archgraph/archgraph
+
+# Runtime state (created by zoneNd daemons)
+zone2/zone2-state/
+zone2-state/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# OS noise
+.DS_Store

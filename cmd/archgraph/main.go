@@ -29,6 +29,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -225,6 +226,15 @@ func startZone(ctx context.Context, label, dir, pkg string, args ...string) (*ex
 	cmdArgs := append([]string{"run", pkg}, args...)
 	cmd := exec.CommandContext(ctx, "go", cmdArgs...)
 	cmd.Dir = dir
+
+	// Filter out Go module environment variables to prevent module resolution conflicts in child go processes
+	var env []string
+	for _, e := range os.Environ() {
+		if !strings.HasPrefix(e, "GOMOD=") && !strings.HasPrefix(e, "GOWORK=") {
+			env = append(env, e)
+		}
+	}
+	cmd.Env = env
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
