@@ -157,6 +157,9 @@ func (a *API) upsertEntity(ctx context.Context, tx *sql.Tx, txnID string, m *Mut
 		// default to active.
 		e.IsActive = true
 	}
+	if e.LifecycleStage == "" {
+		e.LifecycleStage = schema.LifecycleActive
+	}
 	r.EntityID = e.ID
 
 	existing, err := getEntityTx(ctx, tx, e.ID)

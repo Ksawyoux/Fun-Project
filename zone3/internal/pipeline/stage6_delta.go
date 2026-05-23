@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"time"
 
 	"archgraph/zone3/internal/nif"
 	"archgraph/zone3/internal/z4client"
@@ -18,10 +19,7 @@ func (p *Pipeline) stage6DeltaCompute(ctx context.Context, entities []*nif.Entit
 			namespaces[e.Namespace] = struct{}{}
 		}
 	}
-	for _, r := range relationships {
-		// Just in case, check relationship endpoint namespaces via resolved entities
-		// but since we already resolved IDs, we should have the namespace in entities
-	}
+
 
 	// 2. Fetch existing entities & relationships from Zone 4 for each namespace
 	existingEntities := make(map[string]*z4client.Z4Entity)
@@ -120,6 +118,11 @@ func mapNIFEntityToZ4(e *nif.Entity) *z4client.Z4Entity {
 		props["is_partial"] = true
 	}
 
+	validFrom := e.Source.ObservedAt
+	if validFrom.IsZero() {
+		validFrom = time.Now().UTC()
+	}
+
 	return &z4client.Z4Entity{
 		ID:             e.ID,
 		Type:           string(e.Type),
@@ -129,8 +132,8 @@ func mapNIFEntityToZ4(e *nif.Entity) *z4client.Z4Entity {
 		Confidence:     e.Confidence,
 		IsActive:       true,
 		LifecycleStage: "ACTIVE",
-		ValidFrom:      e.Source.ObservedAt,
-		Properties:      props,
+		ValidFrom:      validFrom,
+		Properties:     props,
 	}
 }
 
@@ -148,6 +151,11 @@ func mapNIFRelationshipToZ4(r *nif.Relationship) *z4client.Z4Relationship {
 		props["is_inferred"] = true
 	}
 
+	validFrom := r.Source.ObservedAt
+	if validFrom.IsZero() {
+		validFrom = time.Now().UTC()
+	}
+
 	return &z4client.Z4Relationship{
 		ID:         r.ID,
 		Type:       string(r.Type),
@@ -155,7 +163,7 @@ func mapNIFRelationshipToZ4(r *nif.Relationship) *z4client.Z4Relationship {
 		ToID:       r.ToEntityID,
 		Confidence: r.Confidence,
 		IsActive:   true,
-		ValidFrom:  r.Source.ObservedAt,
+		ValidFrom:  validFrom,
 		Properties: props,
 	}
 }

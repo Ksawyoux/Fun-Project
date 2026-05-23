@@ -49,7 +49,7 @@ func entityEqualForUpdate(a, b *schema.Entity) bool {
 		a.Confidence == b.Confidence &&
 		a.IsActive == b.IsActive &&
 		a.LifecycleStage == b.LifecycleStage &&
-		reflect.DeepEqual(a.Properties, b.Properties)
+		mapsEqual(a.Properties, b.Properties)
 }
 
 func relEqualForUpdate(a, b *schema.Relationship) bool {
@@ -58,5 +58,12 @@ func relEqualForUpdate(a, b *schema.Relationship) bool {
 		a.ToID == b.ToID &&
 		a.Confidence == b.Confidence &&
 		a.IsActive == b.IsActive &&
-		reflect.DeepEqual(a.Properties, b.Properties)
+		mapsEqual(a.Properties, b.Properties)
+}
+
+func mapsEqual(a, b map[string]any) bool {
+	if len(a) == 0 && len(b) == 0 {
+		return true
+	}
+	return reflect.DeepEqual(a, b)
 }

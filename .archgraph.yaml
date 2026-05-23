@@ -1,0 +1,19 @@
+version: "1.0"
+namespace: "acme"
+
+governance:
+  rules:
+    - id: "RULE-01"
+      name: "no-circular-dependencies"
+      severity: "FAIL"
+      scope: "Tiers[2..4]"
+      
+    - id: "RULE-02"
+      name: "require-service-owners"
+      severity: "FAIL"
+      scope: "Tier[2]"
+      
+    - id: "RULE-03"
+      name: "shared-database-table"
+      severity: "WARN"
+      scope: "Tier[3]"
