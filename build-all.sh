@@ -3,28 +3,19 @@
 set -e
 
 echo "🏗️ Building supervisor..."
-cd cmd/archgraph
-go build -tags netgo -ldflags '-s -w' -o ../../app
-cd ../..
+go build -tags netgo -ldflags '-s -w' -o app ./cmd/archgraph
 
 echo "🏗️ Building Zone 2..."
-cd zone2
-go build -tags netgo -ldflags '-s -w' -o zone2d ./cmd/zone2d
-cd ..
+go build -tags netgo -ldflags '-s -w' -o zone2/zone2d ./zone2/cmd/zone2d
 
 echo "🏗️ Building Zone 3..."
-cd zone3
-go build -tags netgo -ldflags '-s -w' -o zone3d ./cmd/zone3d
-cd ..
+go build -tags netgo -ldflags '-s -w' -o zone3/zone3d ./zone3/cmd/zone3d
 
 echo "🏗️ Building Zone 4..."
-cd zone4
-go build -tags netgo -ldflags '-s -w' -o zone4d ./cmd/zone4d
-cd ..
+go build -tags netgo -ldflags '-s -w' -o zone4/zone4d ./zone4/cmd/zone4d
 
 echo "🏗️ Building Zone 5..."
-cd zone5
-go build -tags netgo -ldflags '-s -w' -o zone5d ./cmd/zone5d
-cd ..
+go build -tags netgo -ldflags '-s -w' -o zone5/zone5d ./zone5/cmd/zone5d
 
 echo "✅ All components compiled successfully!"
+
