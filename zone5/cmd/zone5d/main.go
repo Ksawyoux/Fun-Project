@@ -27,16 +27,14 @@ func main() {
 
 	cl := zone4client.New(*zone4URL)
 
-	// LLM adapter: prefer the local `claude` CLI (Claude Code) so we get
-	// real model power using whatever login the host already has — no API
-	// key required. Fall back to the deterministic stub if the binary
-	// isn't installed, so the pipeline still works offline / in tests.
-	// Set ARCHGRAPH_FORCE_STUB=1 to force the stub even when claude exists.
+	// LLM adapter: deterministic stub by default. Operators can opt into the
+	// local `claude` CLI with ARCHGRAPH_ENABLE_CLAUDE_CLI=1 when the host has an
+	// interactive Claude login available.
 	var (
 		llm     reasoner.LLM = reasoner.StubLLM{}
 		llmName              = "stub"
 	)
-	if os.Getenv("ARCHGRAPH_FORCE_STUB") == "" {
+	if os.Getenv("ARCHGRAPH_ENABLE_CLAUDE_CLI") == "1" && os.Getenv("ARCHGRAPH_FORCE_STUB") == "" {
 		if cli, err := reasoner.NewClaudeCLI(os.Getenv("CLAUDE_BIN")); err == nil {
 			llm = cli
 			llmName = "claude-cli"

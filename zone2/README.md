@@ -1,8 +1,8 @@
 # Zone 2 — Ingestion Subsystem (MVP)
 
 Reaches into signal sources (Zone 1), normalizes records into NIF
-(Normalized Ingestion Format), and delivers them to Zone 4 (or to a file
-for testing). Source isolation: nothing downstream knows about git,
+(Normalized Ingestion Format), and delivers them to Zone 3 by default
+(or to Zone 4 directly for debug/dev, or to a file for testing). Source isolation: nothing downstream knows about git,
 filesystems, or AST nodes — only NIF.
 
 ## What's here
@@ -12,7 +12,7 @@ filesystems, or AST nodes — only NIF.
 - **Normalization** — NIF types + deterministic SHA-256 IDs + schema validator.
 - **Orchestration** — In-process topological DAG runner with concurrent
   independent branches and partial-failure isolation.
-- **Delivery** — `Zone4Sink` (POST /v1/mutations) or `FileSink` (JSONL).
+- **Delivery** — `Zone3Sink` (POST `/v1/ingest`) by default, `Zone4Sink` (POST `/v1/mutations`) for direct debug/dev writes, or `FileSink` (JSONL).
 - **Observability** — Append-only ledger, JSONL dead-letter queue,
   on-demand staleness lookup.
 - **REST API** — `/v1/runs`, `/v1/ledger`, `/v1/staleness`, `/v1/health`.
@@ -28,18 +28,20 @@ filesystems, or AST nodes — only NIF.
 
 ## Run
 
-Requires `zone4d` listening (see top-level `cmd/archgraph`).
+Requires `zone3d` listening for the default path (see top-level `cmd/archgraph`).
 
 ```
 go run ./cmd/zone2d \
-  -zone4 http://localhost:8080 \
-  -addr :8082 \
-  -data ./data \
+  -zone3 http://localhost:8082 \
+  -addr :8083 \
+  -state ./zone2-state \
   -config sources.json
 
 # Trigger a run
-curl -X POST localhost:8082/v1/runs -d '{"source_id":"local-repo"}'
+curl -X POST localhost:8083/v1/runs -d '{"trigger":"manual"}'
 ```
+
+For direct debug/dev writes to Zone 4, pass `-zone4 http://localhost:8080`.
 
 ## Architecture
 

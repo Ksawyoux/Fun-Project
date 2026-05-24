@@ -3,13 +3,14 @@
 
 MODULES := nif zone2 zone3 zone4 zone5 zone6 cmd/archgraph
 
-.PHONY: test vet build tidy clean help
+.PHONY: test vet build check tidy clean help
 
 help:
 	@echo "Targets:"
 	@echo "  test   — go test ./... in every module"
 	@echo "  vet    — go vet ./... in every module"
 	@echo "  build  — go build ./... in every module"
+	@echo "  check  — test, vet, and build in every module"
 	@echo "  tidy   — go mod tidy in every module"
 	@echo "  clean  — remove built binaries and runtime state"
 
@@ -30,6 +31,8 @@ build:
 		echo "==> build $$m"; \
 		(cd $$m && go build ./...) || exit 1; \
 	done
+
+check: test vet build
 
 tidy:
 	@set -e; for m in $(MODULES); do \

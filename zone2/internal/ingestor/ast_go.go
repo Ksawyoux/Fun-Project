@@ -48,9 +48,6 @@ func (a *GoAST) Identify() Metadata {
 		SourceType:    "ast",
 		ConnectorType: "pull",
 		Version:       "0.1.0",
-		// Depends on a Git ingestor with the same source_id having run
-		// first. The orchestrator uses this string match to order the DAG.
-		Dependencies: []string{"git:" + a.cfg.SourceID},
 	}
 }
 
@@ -147,8 +144,8 @@ func (a *GoAST) Fetch(ctx context.Context, runID, _ string) (*nif.Batch, string,
 			},
 			Properties: map[string]any{
 				"package_name": pkg.Name,
-				"import_path":   importPath,
-				"dir":           relDir,
+				"import_path":  importPath,
+				"dir":          relDir,
 				"file_count":   len(files),
 			},
 			Confidence:   0.95,
@@ -211,7 +208,7 @@ func emitFileRecords(fset *token.FileSet, root, path string, pkgEnt *nif.Entity,
 		return // already counted as partial during parsePackage
 	}
 
-	relPath := relPath(root, path)
+	relativePath := relPath(root, path)
 
 	// --- Functions ---
 	for _, decl := range file.Decls {
@@ -235,8 +232,8 @@ func emitFileRecords(fset *token.FileSet, root, path string, pkgEnt *nif.Entity,
 			},
 			Properties: map[string]any{
 				"package": pkgEnt.Name,
-				"path":    relPath,
-				"file":    relPath,
+				"path":    relativePath,
+				"file":    relativePath,
 				"line":    fset.Position(fn.Pos()).Line,
 			},
 			Confidence:   0.95,

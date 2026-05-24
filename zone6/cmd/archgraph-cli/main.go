@@ -45,10 +45,10 @@ type Plan struct {
 }
 
 type Answer struct {
-	Text           string                 `json:"text"`
-	MermaidDiagram string                 `json:"mermaid_diagram,omitempty"`
-	Confidence     float64                `json:"confidence"`
-	UsedLLM        string                 `json:"used_llm"`
+	Text           string  `json:"text"`
+	MermaidDiagram string  `json:"mermaid_diagram,omitempty"`
+	Confidence     float64 `json:"confidence"`
+	UsedLLM        string  `json:"used_llm"`
 }
 
 type BlastRadius struct {
@@ -86,9 +86,9 @@ type Smell struct {
 }
 
 type Evolution struct {
-	From        time.Time   `json:"from"`
-	To          time.Time   `json:"to"`
-	DiffSummary DiffSummary `json:"diff_summary"`
+	From        time.Time    `json:"from"`
+	To          time.Time    `json:"to"`
+	DiffSummary DiffSummary  `json:"diff_summary"`
 	DriftAlerts []DriftAlert `json:"drift_alerts,omitempty"`
 }
 
@@ -108,15 +108,15 @@ type DriftAlert struct {
 }
 
 type Entity struct {
-	ID             string         `json:"id"`
-	Type           string         `json:"type"`
-	SubType        string         `json:"sub_type,omitempty"`
-	CanonicalName  string         `json:"canonical_name"`
-	Namespace      string         `json:"namespace"`
-	Confidence     float64        `json:"confidence"`
-	IsActive       bool           `json:"is_active"`
-	Properties     map[string]any `json:"properties,omitempty"`
-	Source         SourceInfo     `json:"source"`
+	ID            string         `json:"id"`
+	Type          string         `json:"type"`
+	SubType       string         `json:"sub_type,omitempty"`
+	CanonicalName string         `json:"canonical_name"`
+	Namespace     string         `json:"namespace"`
+	Confidence    float64        `json:"confidence"`
+	IsActive      bool           `json:"is_active"`
+	Properties    map[string]any `json:"properties,omitempty"`
+	Source        SourceInfo     `json:"source"`
 }
 
 type SourceInfo struct {
@@ -476,7 +476,7 @@ func handleValidate(ctx context.Context, zone4Addr, zone5Addr string, cfg *Confi
 		if e.Type == "SERVICE" {
 			owner, hasOwner := e.Properties["owner"]
 			primaryOwner, hasPrimaryOwner := e.Properties["primary_owner"]
-			
+
 			// If both are missing or empty
 			isMissing := true
 			if hasOwner {
@@ -762,18 +762,18 @@ func handleGraph(ctx context.Context, zone4Addr, namespace string, args []string
 	if format == "mermaid" {
 		fmt.Println("```mermaid")
 		fmt.Println("flowchart TD")
-		
+
 		// Define nodes
 		for _, e := range listing.Entities {
 			cleanName := strings.ReplaceAll(e.CanonicalName, "\"", "\\\"")
 			fmt.Printf("    %s[\"%s (%s)\"]\n", e.ID, cleanName, e.Type)
 		}
-		
+
 		// Define connections
 		for _, r := range listing.Relationships {
 			fmt.Printf("    %s -->|%s| %s\n", r.FromID, r.Type, r.ToID)
 		}
-		
+
 		fmt.Println("```")
 		return
 	}
@@ -1138,7 +1138,7 @@ func handleRequest(ctx context.Context, zone4Addr, zone5Addr, defaultNamespace s
 			sendError(req.ID, -32602, "Invalid params", nil)
 			return
 		}
-		
+
 		res, err := callTool(ctx, zone4Addr, zone5Addr, defaultNamespace, params.Name, params.Arguments)
 		if err != nil {
 			sendResult(req.ID, ToolCallResult{
@@ -1167,7 +1167,7 @@ func handleRequest(ctx context.Context, zone4Addr, zone5Addr, defaultNamespace s
 			sendError(req.ID, -32602, "Invalid params", nil)
 			return
 		}
-		
+
 		res, err := readResource(ctx, zone4Addr, zone5Addr, defaultNamespace, params.URI)
 		if err != nil {
 			sendError(req.ID, -32603, err.Error(), nil)
@@ -1191,19 +1191,19 @@ func callTool(ctx context.Context, zone4Addr, zone5Addr, defaultNamespace string
 		if ns == "" {
 			ns = defaultNamespace
 		}
-		
+
 		reqBody, _ := json.Marshal(map[string]string{"namespace": ns})
 		resp, err := postJSON(ctx, zone5Addr+"/v1/health-audit", reqBody)
 		if err != nil {
 			return nil, err
 		}
 		defer resp.Body.Close()
-		
+
 		var hr HealthReport
 		if err := json.NewDecoder(resp.Body).Decode(&hr); err != nil {
 			return nil, err
 		}
-		
+
 		var b bytes.Buffer
 		fmt.Fprintf(&b, "🏥 Health Audit for Namespace: %s\n", hr.Namespace)
 		fmt.Fprintf(&b, "Summary: Nodes=%d, Edges=%d, Cycles=%d, Supernodes=%d\n\n",
@@ -1216,7 +1216,7 @@ func callTool(ctx context.Context, zone4Addr, zone5Addr, defaultNamespace string
 		} else {
 			fmt.Fprintln(&b, "✅ No smells detected.")
 		}
-		
+
 		return &ToolCallResult{Content: []ToolContent{{Type: "text", Text: b.String()}}}, nil
 
 	case "archgraph_get_diff":
@@ -1232,7 +1232,7 @@ func callTool(ctx context.Context, zone4Addr, zone5Addr, defaultNamespace string
 		if ns == "" {
 			ns = defaultNamespace
 		}
-		
+
 		tA, err := getCommitTime(m.ReferenceA)
 		if err != nil {
 			return nil, fmt.Errorf("resolve refA: %w", err)
@@ -1241,7 +1241,7 @@ func callTool(ctx context.Context, zone4Addr, zone5Addr, defaultNamespace string
 		if err != nil {
 			return nil, fmt.Errorf("resolve refB: %w", err)
 		}
-		
+
 		reqBody, _ := json.Marshal(map[string]any{
 			"namespace": ns,
 			"from":      tA,
@@ -1252,25 +1252,25 @@ func callTool(ctx context.Context, zone4Addr, zone5Addr, defaultNamespace string
 			return nil, err
 		}
 		defer resp.Body.Close()
-		
+
 		var evo Evolution
 		if err := json.NewDecoder(resp.Body).Decode(&evo); err != nil {
 			return nil, err
 		}
-		
+
 		var b bytes.Buffer
 		fmt.Fprintf(&b, "🔄 Architecture Diff [%s ➔ %s]\n", m.ReferenceA, m.ReferenceB)
 		fmt.Fprintf(&b, "Time Range: %s to %s\n\n", evo.From.Format(time.RFC3339), evo.To.Format(time.RFC3339))
 		fmt.Fprintf(&b, "Nodes Added: %d, Removed: %d, Updated: %d\n", evo.DiffSummary.NodesAdded, evo.DiffSummary.NodesRemoved, evo.DiffSummary.NodesUpdated)
 		fmt.Fprintf(&b, "Edges Added: %d, Removed: %d, Modified: %d\n", evo.DiffSummary.EdgesAdded, evo.DiffSummary.EdgesRemoved, evo.DiffSummary.EdgesModified)
-		
+
 		if len(evo.DriftAlerts) > 0 {
 			fmt.Fprintln(&b, "\nDrift Alerts:")
 			for _, alert := range evo.DriftAlerts {
 				fmt.Fprintf(&b, "  - [%s] %s (Entity ID: %s)\n", alert.Severity, alert.Message, alert.EntityID)
 			}
 		}
-		
+
 		return &ToolCallResult{Content: []ToolContent{{Type: "text", Text: b.String()}}}, nil
 
 	case "archgraph_suggestions":
@@ -1282,19 +1282,19 @@ func callTool(ctx context.Context, zone4Addr, zone5Addr, defaultNamespace string
 		if ns == "" {
 			ns = defaultNamespace
 		}
-		
+
 		reqBody, _ := json.Marshal(map[string]string{"namespace": ns})
 		resp, err := postJSON(ctx, zone5Addr+"/v1/health-audit", reqBody)
 		if err != nil {
 			return nil, err
 		}
 		defer resp.Body.Close()
-		
+
 		var hr HealthReport
 		if err := json.NewDecoder(resp.Body).Decode(&hr); err != nil {
 			return nil, err
 		}
-		
+
 		var suggestions []string
 		for _, s := range hr.Smells {
 			switch s.Type {
@@ -1306,7 +1306,7 @@ func callTool(ctx context.Context, zone4Addr, zone5Addr, defaultNamespace string
 				suggestions = append(suggestions, fmt.Sprintf("- **Decouple bottleneck supernode**: The node %v has excessively high degree. Consider dividing its responsibilities or introducing caching/queues.", s.Nodes))
 			}
 		}
-		
+
 		entities, err := fetchAllEntities(ctx, zone4Addr, ns)
 		if err == nil {
 			for _, e := range entities {
@@ -1332,7 +1332,7 @@ func callTool(ctx context.Context, zone4Addr, zone5Addr, defaultNamespace string
 				}
 			}
 		}
-		
+
 		var b bytes.Buffer
 		fmt.Fprintf(&b, "💡 Refactoring Suggestions for Namespace: %s\n\n", ns)
 		if len(suggestions) > 0 {
@@ -1342,7 +1342,7 @@ func callTool(ctx context.Context, zone4Addr, zone5Addr, defaultNamespace string
 		} else {
 			fmt.Fprintln(&b, "✅ Codebase is in excellent architectural health! No recommendations needed.")
 		}
-		
+
 		return &ToolCallResult{Content: []ToolContent{{Type: "text", Text: b.String()}}}, nil
 
 	case "archgraph_blast_radius":
@@ -1359,7 +1359,7 @@ func callTool(ctx context.Context, zone4Addr, zone5Addr, defaultNamespace string
 		if ns == "" {
 			ns = defaultNamespace
 		}
-		
+
 		entityID := m.EntityID
 		if entityID == "" && m.File != "" {
 			resolved, err := findEntityByFileAndLine(ctx, zone4Addr, ns, m.File, m.Line)
@@ -1368,11 +1368,11 @@ func callTool(ctx context.Context, zone4Addr, zone5Addr, defaultNamespace string
 			}
 			entityID = resolved
 		}
-		
+
 		if entityID == "" {
 			return nil, errors.New("must supply entityId or file path")
 		}
-		
+
 		reqBody, _ := json.Marshal(map[string]any{
 			"entity_id": entityID,
 			"max_depth": 3,
@@ -1382,12 +1382,12 @@ func callTool(ctx context.Context, zone4Addr, zone5Addr, defaultNamespace string
 			return nil, err
 		}
 		defer resp.Body.Close()
-		
+
 		var br BlastRadius
 		if err := json.NewDecoder(resp.Body).Decode(&br); err != nil {
 			return nil, err
 		}
-		
+
 		var b bytes.Buffer
 		fmt.Fprintf(&b, "🛡️ Blast Radius Report for: %s (Type: %s)\n\n", br.Origin.CanonicalName, br.Origin.Type)
 		if len(br.Affected) > 0 {
@@ -1398,7 +1398,7 @@ func callTool(ctx context.Context, zone4Addr, zone5Addr, defaultNamespace string
 		} else {
 			fmt.Fprintln(&b, "No downstream caller is affected.")
 		}
-		
+
 		return &ToolCallResult{Content: []ToolContent{{Type: "text", Text: b.String()}}}, nil
 
 	case "archgraph_ask":
@@ -1413,7 +1413,7 @@ func callTool(ctx context.Context, zone4Addr, zone5Addr, defaultNamespace string
 		if ns == "" {
 			ns = defaultNamespace
 		}
-		
+
 		reqBody, _ := json.Marshal(AskReq{
 			Question:  m.Question,
 			Namespace: ns,
@@ -1423,17 +1423,17 @@ func callTool(ctx context.Context, zone4Addr, zone5Addr, defaultNamespace string
 			return nil, err
 		}
 		defer resp.Body.Close()
-		
+
 		var askResp AskResp
 		if err := json.NewDecoder(resp.Body).Decode(&askResp); err != nil {
 			return nil, err
 		}
-		
+
 		text := "No answer was returned."
 		if askResp.Answer != nil {
 			text = askResp.Answer.Text
 		}
-		
+
 		return &ToolCallResult{Content: []ToolContent{{Type: "text", Text: text}}}, nil
 
 	case "archgraph_document":
@@ -1484,12 +1484,12 @@ Relationships:
 			return nil, err
 		}
 		defer resp.Body.Close()
-		
+
 		var hr HealthReport
 		if err := json.NewDecoder(resp.Body).Decode(&hr); err != nil {
 			return nil, err
 		}
-		
+
 		summaryText := fmt.Sprintf("Namespace: %s\nTotal Nodes: %d\nTotal Edges: %d\nCircular Cycles Detected: %d\nBottleneck Supernodes: %d",
 			hr.Namespace, hr.Summary.Entities, hr.Summary.Relationships, hr.Summary.CyclesFound, hr.Summary.Supernodes)
 		return &ResourceReadResult{
@@ -1504,7 +1504,7 @@ Relationships:
 			return nil, err
 		}
 		defer resp.Body.Close()
-		
+
 		body, _ := io.ReadAll(resp.Body)
 		return &ResourceReadResult{
 			Contents: []ResourceContent{
@@ -1629,7 +1629,7 @@ func getExecutiveSummary(ctx context.Context, zone5Addr, namespace string, entit
 		Question:  fmt.Sprintf("Summarize the architecture of namespace %s in 3 sentences.", namespace),
 		Namespace: namespace,
 	})
-	
+
 	client := &http.Client{Timeout: 3 * time.Second}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, zone5Addr+"/v1/ask", bytes.NewReader(reqBody))
 	if err == nil {
@@ -1663,17 +1663,17 @@ func computeLocalBlastRadius(startID string, entities []*Entity, outRels map[str
 	queue := []string{startID}
 	visited := map[string]bool{startID: true}
 	depthMap := map[string]int{startID: 0}
-	
+
 	var affected []string
 	for len(queue) > 0 {
 		curr := queue[0]
 		queue = queue[1:]
-		
+
 		currDepth := depthMap[curr]
 		if currDepth >= 3 {
 			continue
 		}
-		
+
 		for _, rel := range inRels[curr] {
 			parentID := rel.FromID
 			if !visited[parentID] {
@@ -1684,11 +1684,11 @@ func computeLocalBlastRadius(startID string, entities []*Entity, outRels map[str
 			}
 		}
 	}
-	
+
 	total := len(entities)
 	percentage := 0.0
 	if total > 1 {
-		percentage = (float64(len(affected)) / float64(total - 1)) * 100.0
+		percentage = (float64(len(affected)) / float64(total-1)) * 100.0
 	}
 	return affected, percentage
 }
@@ -1795,7 +1795,7 @@ func generateDocumentation(ctx context.Context, zone4Addr, zone5Addr, namespace 
 	sb.WriteString("## 🗺️  Detailed Module Breakdown\n")
 	for _, e := range listing.Entities {
 		sb.WriteString(fmt.Sprintf("### 📦 %s (`%s`)\n", e.CanonicalName, e.Type))
-		
+
 		purpose := "No purpose declared."
 		if desc, ok := e.Properties["description"].(string); ok && desc != "" {
 			purpose = desc
@@ -1832,7 +1832,7 @@ func generateDocumentation(ctx context.Context, zone4Addr, zone5Addr, namespace 
 				sb.WriteString(fmt.Sprintf("  - `-- (%s) -->` **%s**\n", edge.Type, targetName))
 			}
 		}
-		
+
 		if pStr, ok := pathStr.(string); ok && pStr != "" {
 			fullPath := filepath.Join(wsRoot, pStr)
 			readmeContent := hoistREADME(fullPath)
@@ -1846,14 +1846,14 @@ func generateDocumentation(ctx context.Context, zone4Addr, zone5Addr, namespace 
 
 	sb.WriteString("## ⚡ Component API Reference & Contracts\n")
 	sb.WriteString("This section documents the operations and contracts registered across components.\n\n")
-	
+
 	hasContracts := false
 	for _, e := range listing.Entities {
 		if e.Type == "SERVICE" {
 			dbReads := []string{}
 			dbWrites := []string{}
 			calls := []string{}
-			
+
 			for _, edge := range outRels[e.ID] {
 				target, ok := entMap[edge.ToID]
 				if !ok {
@@ -1869,7 +1869,7 @@ func generateDocumentation(ctx context.Context, zone4Addr, zone5Addr, namespace 
 					calls = append(calls, target.CanonicalName)
 				}
 			}
-			
+
 			if len(dbReads) > 0 || len(dbWrites) > 0 || len(calls) > 0 {
 				hasContracts = true
 				sb.WriteString(fmt.Sprintf("### %s API Reference\n", e.CanonicalName))
@@ -1897,7 +1897,7 @@ func generateDocumentation(ctx context.Context, zone4Addr, zone5Addr, namespace 
 	}
 
 	sb.WriteString("## 🛡️  Cross-Cutting Concerns\n\n")
-	
+
 	sb.WriteString("### Authentication & Authorization\n")
 	var authProtected []string
 	for _, e := range listing.Entities {
@@ -1958,7 +1958,7 @@ func generateDocumentation(ctx context.Context, zone4Addr, zone5Addr, namespace 
 
 	sb.WriteString("### Centrality Analysis (Dependency Hubs)\n")
 	sb.WriteString("Centrality highlights \"Hub\" entities that have a high number of inbound or outbound links, marking potential single points of failure:\n\n")
-	
+
 	type centrality struct {
 		name   string
 		t      string
@@ -1976,7 +1976,7 @@ func generateDocumentation(ctx context.Context, zone4Addr, zone5Addr, namespace 
 			out:    outDegree[e.ID],
 		})
 	}
-	
+
 	for i := 0; i < len(cents); i++ {
 		for j := i + 1; j < len(cents); j++ {
 			if cents[i].degree < cents[j].degree {

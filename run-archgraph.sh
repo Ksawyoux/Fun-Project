@@ -47,8 +47,9 @@ if [ -n "$PID_TO_KILL" ]; then
   kill -9 $PID_TO_KILL 2>/dev/null || true
 fi
 
-# Detect languages present in the target repo. We always ingest git history;
-# AST ingestion is enabled per-language based on what files exist.
+# Detect languages present in the target repo. Git ingestion is enabled only
+# when the target is a Git worktree; AST ingestion is enabled per-language
+# based on what files exist, so plain folders with Go code still work.
 # Skip common dependency / build dirs so we don't false-positive on vendored code.
 has_ext() {
   # Args: one or more bare extensions (e.g. ts tsx). Returns 0 if any matching
@@ -70,6 +71,11 @@ has_ext() {
 DETECTED=()
 SUPPORTED=()
 UNSUPPORTED=()
+IS_GIT_REPO=0
+
+if git -C "$REPO_PATH" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  IS_GIT_REPO=1
+fi
 
 if has_ext go;             then DETECTED+=("go");         SUPPORTED+=("go"); fi
 if has_ext py;             then DETECTED+=("python");     UNSUPPORTED+=("python"); fi
@@ -79,13 +85,20 @@ if has_ext rs;             then DETECTED+=("rust");       UNSUPPORTED+=("rust");
 if has_ext java kt;        then DETECTED+=("jvm");        UNSUPPORTED+=("jvm"); fi
 if has_ext rb;             then DETECTED+=("ruby");       UNSUPPORTED+=("ruby"); fi
 
-if [ ${#DETECTED[@]} -eq 0 ]; then
+if [ ${#DETECTED[@]} -eq 0 ] && [ "$IS_GIT_REPO" -eq 1 ]; then
   echo -e "${YELLOW}⚠️  No recognized source files found — ingesting git history only.${NC}"
+elif [ ${#DETECTED[@]} -eq 0 ]; then
+  echo -e "${RED}No supported source files found and target is not a Git repo: $REPO_PATH${NC}"
+  exit 1
 else
   echo -e "${BLUE}[1/5] Languages detected:${NC} ${DETECTED[*]}"
 fi
 if [ ${#UNSUPPORTED[@]} -gt 0 ]; then
-  echo -e "${YELLOW}    AST parsers not yet wired for: ${UNSUPPORTED[*]} (git history will still be ingested).${NC}"
+  if [ "$IS_GIT_REPO" -eq 1 ]; then
+    echo -e "${YELLOW}    AST parsers not yet wired for: ${UNSUPPORTED[*]} (git history will still be ingested).${NC}"
+  else
+    echo -e "${YELLOW}    AST parsers not yet wired for: ${UNSUPPORTED[*]}.${NC}"
+  fi
 fi
 
 # Build the ast_go block only if Go files are present.
@@ -107,18 +120,41 @@ EOF
   fi
 done
 
-# Generate a temporary sources.json for Zone 2
-CONFIG_PATH="/tmp/archgraph_sources.json"
-echo -e "${BLUE}[2/5] Generating ingestion config at:${NC} $CONFIG_PATH"
-cat <<EOF > "$CONFIG_PATH"
-{
+GIT_BLOCK=""
+if [ "$IS_GIT_REPO" -eq 1 ]; then
+  GIT_BLOCK=$(cat <<EOF
   "git": [
     {
       "source_id": "auto-scan",
       "repo_path": "$REPO_PATH",
       "namespace": "$NAMESPACE"
     }
-  ]$AST_GO_BLOCK
+  ]
+EOF
+)
+else
+  echo -e "${YELLOW}    Target is not a Git repo; skipping Git ingestion and scanning supported source files only.${NC}"
+fi
+
+if [ -z "$GIT_BLOCK" ] && [ -z "$AST_GO_BLOCK" ]; then
+  echo -e "${RED}No supported ingestion path exists for: $REPO_PATH${NC}"
+  exit 1
+fi
+
+if [ -n "$GIT_BLOCK" ] && [ -n "$AST_GO_BLOCK" ]; then
+  CONFIG_BODY="$GIT_BLOCK$AST_GO_BLOCK"
+elif [ -n "$GIT_BLOCK" ]; then
+  CONFIG_BODY="$GIT_BLOCK"
+else
+  CONFIG_BODY="${AST_GO_BLOCK#,}"
+fi
+
+# Generate a temporary sources.json for Zone 2
+CONFIG_PATH="/tmp/archgraph_sources.json"
+echo -e "${BLUE}[2/5] Generating ingestion config at:${NC} $CONFIG_PATH"
+cat <<EOF > "$CONFIG_PATH"
+{
+$CONFIG_BODY
 }
 EOF
 
@@ -169,6 +205,20 @@ done
 # Trigger Ingestion
 echo -e "${BLUE}[5/5] Triggering ingestion scan...${NC}"
 INGEST_RESP=$(curl -s -X POST http://localhost:8083/v1/runs)
+if echo "$INGEST_RESP" | grep -q '"status":"failed"'; then
+  echo -e "${RED}Ingestion failed:${NC}"
+  echo "$INGEST_RESP"
+  exit 1
+fi
+if echo "$INGEST_RESP" | grep -q '"error"'; then
+  echo -e "${RED}Ingestion request failed:${NC}"
+  echo "$INGEST_RESP"
+  exit 1
+fi
+if echo "$INGEST_RESP" | grep -q '"status":"partial"'; then
+  echo -e "${YELLOW}Ingestion completed with partial failures:${NC}"
+  echo "$INGEST_RESP"
+fi
 echo -e "${GREEN}Ingestion complete!${NC}"
 
 # Wait a short moment for changes to commit to storage

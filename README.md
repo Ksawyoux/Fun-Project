@@ -127,11 +127,11 @@ The repository is structured as a Go multi-module workspace containing the prima
 
 ## ⚡ Quick Start: Running the Entire System
 
-A supervisor tool is provided to start all implemented zones in their correct dependency order under a single terminal command. It starts Zone 4 (Graph Storage), waits for it to become healthy, and then boots Zone 5 (Intelligence Layer) pointing to Zone 4.
+A supervisor tool is provided to start all implemented zones in their correct dependency order under a single terminal command. It starts Zone 4 (Graph Storage), Zone 3 (Processing Pipeline), Zone 2 (Ingestion), and Zone 5 (Intelligence Layer), wiring the default ingestion path as Zone 2 → Zone 3 → Zone 4.
 
 ### Prerequisites
 
-- **Go** (version 1.20 or newer recommended)
+- **Go** (version 1.22 or newer recommended)
 - **SQLite3**
 
 ### Execution
@@ -143,14 +143,37 @@ cd cmd/archgraph
 go run . -root ../..
 ```
 
+To scan a specific project folder or repository and print a CLI graph:
+
+```bash
+./run-archgraph.sh /path/to/project local-dev
+```
+
+Git metadata is ingested when the target is a Git worktree. Supported AST ingestion currently covers Go projects, including plain folders without `.git`.
+
+### Developer Checks
+
+This repository is a Go workspace made of multiple modules, so `go test ./...` from the repository root is not the right command. Use the root Makefile fan-out targets instead:
+
+```bash
+make test
+make vet
+make build
+make check
+```
+
 #### Available Flags for the Supervisor:
-* `-root` — Path to the project root containing `zone4/` and `zone5/` (default `.`)
+* `-root` — Path to the project root containing `zone2/`, `zone3/`, `zone4/`, and `zone5/` (default `.`)
+* `-zone2-port` — Port for the Zone 2 daemon (default `8083`)
+* `-zone3-port` — Port for the Zone 3 daemon (default `8082`)
 * `-zone4-port` — Port for the Zone 4 daemon (default `8080`)
 * `-zone5-port` — Port for the Zone 5 daemon (default `8081`)
 * `-db` — SQLite database path passed to Zone 4 (default `zone4.db`)
+* `-zone3-db` — SQLite registry database path passed to Zone 3 (default `zone3.db`)
+* `-zone2-config` — Source config passed to Zone 2 (empty scans supervisor CWD)
 * `-ready-timeout` — Max time to wait for Zone 4 to become healthy (default `30s`)
 
-Once running, you will see prefixed logs (`[zone4]` and `[zone5]`) interleaved readably in your terminal. On termination (`Ctrl+C`), both services will be gracefully shut down.
+Once running, you will see prefixed logs (`[zone2]`, `[zone3]`, `[zone4]`, and `[zone5]`) interleaved readably in your terminal. On termination (`Ctrl+C`), all services will be gracefully shut down.
 
 ---
 
@@ -163,10 +186,10 @@ Located in **[zone2/](file:///Users/MacBook/Fun_Project/Fun-Project/zone2)**, th
 * **Ingestors:** Git history extractor (via the system `git` CLI) and Go AST parser (via `go/parser`) that extract entities and relationships from code.
 * **NIF Normalization:** Unified type system with deterministic SHA-256 entity IDs and built-in schema validation.
 * **Orchestration:** In-process topological DAG runner with concurrent independent branches and partial-failure isolation.
-* **Delivery:** `Zone4Sink` (HTTP POST to `/v1/mutations`) or `FileSink` (JSONL for offline testing).
+* **Delivery:** `Zone3Sink` (HTTP POST to `/v1/ingest`) by default, `Zone4Sink` only for direct debug/dev writes, or `FileSink` (JSONL for offline testing).
 * **Observability:** Append-only ingestion ledger, JSONL dead-letter queue, and on-demand staleness lookups.
 
-### Key Endpoints (Port 8082)
+### Key Endpoints (Port 8083)
 * `POST /v1/runs` — Trigger an ingestion run for a configured source.
 * `GET /v1/ledger` — Query the append-only ingestion activity log.
 * `GET /v1/staleness` — Check freshness of previously ingested sources.
@@ -296,4 +319,3 @@ go build -o archgraph ./cmd/archgraph-cli
   ```bash
   cd zone5 && go test ./...
   ```
-

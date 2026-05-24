@@ -1,9 +1,9 @@
 // Package delivery is the boundary between Zone 2 and whatever consumes
-// NIF records — Zone 4 today, possibly Zone 3 (an event bus) later.
+// NIF records — Zone 3 by default, Zone 4 only for direct debug/dev writes.
 //
 // The Sink interface keeps that boundary swappable. Two concrete sinks for
-// MVP: Zone4Sink (HTTP to zone4d) and FileSink (JSONL on disk, useful for
-// tests and for the "no zone4 running" demo case).
+// MVP: Zone3Sink (HTTP to zone3d), Zone4Sink (direct debug/dev path), and
+// FileSink (JSONL on disk, useful for tests).
 package delivery
 
 import (
