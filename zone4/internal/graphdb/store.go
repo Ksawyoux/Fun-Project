@@ -17,6 +17,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"archgraph/zone4/internal/schema"
@@ -37,6 +39,13 @@ type Store struct {
 // Open opens (or creates) the SQLite database at the given path and applies
 // the schema migration. Pass ":memory:" for ephemeral in-process storage.
 func Open(path string) (*Store, error) {
+	if path != ":memory:" {
+		dir := filepath.Dir(path)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return nil, fmt.Errorf("create database directory: %w", err)
+		}
+	}
+
 	db, err := sql.Open("sqlite3", path)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
