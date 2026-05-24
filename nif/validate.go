@@ -85,13 +85,13 @@ func ValidateRelationship(r *Relationship) error {
 }
 
 var entitySet = map[EntityType]struct{}{
-	EntityService:       {},
-	EntityModule:        {},
-	EntityFunction:      {},
-	EntityAPIEndpoint:   {},
-	EntityDatabaseTable: {},
-	EntityTeam:          {},
-	EntitySchema:        {},
+	EntityService:        {},
+	EntityModule:         {},
+	EntityFunction:       {},
+	EntityAPIEndpoint:    {},
+	EntityDatabaseTable:  {},
+	EntityTeam:           {},
+	EntityDatabaseSchema: {},
 }
 
 func knownEntityType(t EntityType) bool {
@@ -102,7 +102,7 @@ func knownEntityType(t EntityType) bool {
 var relSet = map[RelationshipType]struct{}{
 	RelDependsOn: {}, RelCalls: {}, RelImports: {}, RelOwns: {},
 	RelExposes: {}, RelRuntimeCalls: {}, RelReadsFrom: {},
-	RelWritesTo: {}, RelChangeCoupledWith: {}, RelAuthoredBy: {}, RelDeployedTo: {},
+	RelWritesTo: {}, RelChangeCoupledWith: {}, RelContributedTo: {}, RelDeployedOn: {},
 }
 
 func knownRelType(t RelationshipType) bool {

@@ -144,9 +144,15 @@ func entityToZ4(e *nif.Entity) map[string]any {
 	if e.IsPartial {
 		props["is_partial"] = true
 	}
+
+	entType := string(e.Type)
+	if entType == "SCHEMA" {
+		entType = "DATABASE_SCHEMA"
+	}
+
 	return map[string]any{
 		"id":              e.ID,
-		"type":            string(e.Type),
+		"type":            entType,
 		"sub_type":        e.SubType,
 		"canonical_name":  e.Name,
 		"namespace":       e.Namespace,
@@ -171,9 +177,17 @@ func relationshipToZ4(r *nif.Relationship) map[string]any {
 	if r.IsInferred {
 		props["is_inferred"] = true
 	}
+
+	relType := string(r.Type)
+	if relType == "AUTHORED_BY" {
+		relType = "CONTRIBUTED_TO"
+	} else if relType == "DEPLOYED_TO" {
+		relType = "DEPLOYED_ON"
+	}
+
 	return map[string]any{
 		"id":         r.ID,
-		"type":       string(r.Type),
+		"type":       relType,
 		"from_id":    r.FromEntityID,
 		"to_id":      r.ToEntityID,
 		"confidence": r.Confidence,

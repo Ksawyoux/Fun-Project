@@ -7,6 +7,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -84,12 +85,16 @@ func (a *GoAST) CheckConnectivity(ctx context.Context) error {
 func (a *GoAST) Fetch(ctx context.Context, runID, _ string) (*nif.Batch, string, error) {
 	now := time.Now().UTC()
 	batch := &nif.Batch{}
+	root, err := filepath.Abs(a.cfg.RootPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("abs root %s: %w", a.cfg.RootPath, err)
+	}
 
 	// First pass: walk filesystem, collect Go files grouped by directory.
 	// Each directory == one package (the standard Go layout convention).
 	pkgFiles := map[string][]string{}
 	ignore := normalizeIgnore(a.cfg.IgnoreDirs)
-	walkErr := filepath.WalkDir(a.cfg.RootPath, func(path string, d fs.DirEntry, err error) error {
+	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // skip unreadable nodes silently; better partial than fail
 		}
@@ -108,22 +113,24 @@ func (a *GoAST) Fetch(ctx context.Context, runID, _ string) (*nif.Batch, string,
 		return nil
 	})
 	if walkErr != nil {
-		return nil, "", fmt.Errorf("walk %s: %w", a.cfg.RootPath, walkErr)
+		return nil, "", fmt.Errorf("walk %s: %w", root, walkErr)
+	}
+	modules, err := discoverGoModules(root, ignore)
+	if err != nil {
+		return nil, "", err
 	}
 
 	// Per-package processing.
 	fset := token.NewFileSet()
 	pkgEntities := map[string]*nif.Entity{} // dir → entity
+	importIndex := map[string]*nif.Entity{} // import path → entity
 	for dir, files := range pkgFiles {
 		pkg, partial := parsePackage(fset, files)
 		if pkg == nil {
 			continue
 		}
-		relDir, _ := filepath.Rel(a.cfg.RootPath, dir)
-		if relDir == "" {
-			relDir = "."
-		}
-		importPath := strings.ReplaceAll(relDir, string(filepath.Separator), "/")
+		importPath := packageImportPath(root, dir, modules)
+		relDir := relPath(root, dir)
 
 		pkgEnt := &nif.Entity{
 			ID:        nif.DeterministicEntityID("ast", a.cfg.SourceID, nif.EntityModule, importPath, a.cfg.Namespace),
@@ -140,6 +147,8 @@ func (a *GoAST) Fetch(ctx context.Context, runID, _ string) (*nif.Batch, string,
 			},
 			Properties: map[string]any{
 				"package_name": pkg.Name,
+				"import_path":   importPath,
+				"dir":           relDir,
 				"file_count":   len(files),
 			},
 			Confidence:   0.95,
@@ -148,6 +157,7 @@ func (a *GoAST) Fetch(ctx context.Context, runID, _ string) (*nif.Batch, string,
 		}
 		batch.Entities = append(batch.Entities, pkgEnt)
 		pkgEntities[dir] = pkgEnt
+		importIndex[importPath] = pkgEnt
 	}
 
 	// Second pass: per-file functions + imports.
@@ -157,7 +167,7 @@ func (a *GoAST) Fetch(ctx context.Context, runID, _ string) (*nif.Batch, string,
 			continue
 		}
 		for _, path := range files {
-			emitFileRecords(fset, path, dir, pkgEnt, batch, a.cfg.SourceID, a.cfg.Namespace, runID, now, pkgEntities)
+			emitFileRecords(fset, root, path, pkgEnt, batch, a.cfg.SourceID, a.cfg.Namespace, runID, now, importIndex)
 		}
 	}
 
@@ -195,16 +205,13 @@ func parsePackage(fset *token.FileSet, files []string) (*ast.Package, bool) {
 // emitFileRecords runs once per .go file. It re-parses with full mode (to
 // get FuncDecls) and emits one FUNCTION entity per top-level function plus
 // one IMPORTS edge per import line.
-func emitFileRecords(fset *token.FileSet, path, dir string, pkgEnt *nif.Entity, batch *nif.Batch, sourceID, namespace, runID string, now time.Time, pkgEntities map[string]*nif.Entity) {
+func emitFileRecords(fset *token.FileSet, root, path string, pkgEnt *nif.Entity, batch *nif.Batch, sourceID, namespace, runID string, now time.Time, importIndex map[string]*nif.Entity) {
 	file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
 	if err != nil {
 		return // already counted as partial during parsePackage
 	}
 
-	relPath, _ := filepath.Rel(filepath.Dir(dir), path)
-	if relPath == "" {
-		relPath = filepath.Base(path)
-	}
+	relPath := relPath(root, path)
 
 	// --- Functions ---
 	for _, decl := range file.Decls {
@@ -228,6 +235,7 @@ func emitFileRecords(fset *token.FileSet, path, dir string, pkgEnt *nif.Entity, 
 			},
 			Properties: map[string]any{
 				"package": pkgEnt.Name,
+				"path":    relPath,
 				"file":    relPath,
 				"line":    fset.Position(fn.Pos()).Line,
 			},
@@ -258,13 +266,7 @@ func emitFileRecords(fset *token.FileSet, path, dir string, pkgEnt *nif.Entity, 
 		// Only emit IMPORTS edges to packages we've seen in THIS run (i.e.,
 		// internal imports). External imports are noise without a real
 		// dependency resolver — deferred.
-		var target *nif.Entity
-		for _, e := range pkgEntities {
-			if e.Name == importPath {
-				target = e
-				break
-			}
-		}
+		target := importIndex[importPath]
 		if target == nil || target.ID == pkgEnt.ID {
 			continue
 		}
@@ -283,6 +285,97 @@ func emitFileRecords(fset *token.FileSet, path, dir string, pkgEnt *nif.Entity, 
 			IngestionRun: runID,
 		})
 	}
+}
+
+type goModule struct {
+	dir        string
+	modulePath string
+}
+
+func discoverGoModules(root string, ignore map[string]struct{}) ([]goModule, error) {
+	var modules []goModule
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if _, skip := ignore[d.Name()]; skip {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.Name() != "go.mod" {
+			return nil
+		}
+		modulePath, err := readModulePath(path)
+		if err != nil || modulePath == "" {
+			return nil
+		}
+		modules = append(modules, goModule{dir: filepath.Dir(path), modulePath: modulePath})
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("discover go modules: %w", err)
+	}
+	return modules, nil
+}
+
+func readModulePath(path string) (string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "//") {
+			continue
+		}
+		if strings.HasPrefix(line, "module ") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "module ")), nil
+		}
+	}
+	return "", nil
+}
+
+func packageImportPath(root, dir string, modules []goModule) string {
+	mod := nearestModule(dir, modules)
+	if mod == nil {
+		return relPath(root, dir)
+	}
+	rel := relPath(mod.dir, dir)
+	if rel == "." {
+		return mod.modulePath
+	}
+	return mod.modulePath + "/" + rel
+}
+
+func nearestModule(dir string, modules []goModule) *goModule {
+	var best *goModule
+	for i := range modules {
+		if !isWithin(dir, modules[i].dir) {
+			continue
+		}
+		if best == nil || len(modules[i].dir) > len(best.dir) {
+			best = &modules[i]
+		}
+	}
+	return best
+}
+
+func isWithin(path, parent string) bool {
+	rel, err := filepath.Rel(parent, path)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != "" && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != "..")
+}
+
+func relPath(root, path string) string {
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel == "" {
+		return "."
+	}
+	return filepath.ToSlash(rel)
 }
 
 func fmtLine(fset *token.FileSet, pos token.Pos) string {

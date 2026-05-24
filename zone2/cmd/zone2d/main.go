@@ -43,8 +43,9 @@ func main() {
 	var (
 		addr        = flag.String("addr", ":8083", "HTTP listen address")
 		stateDir    = flag.String("state", "./zone2-state", "Directory for checkpoints, ledger, DLQ")
-		zone4URL    = flag.String("zone4", "http://localhost:8080", "Zone 4 base URL (mutations sink)")
-		fileSinkDir = flag.String("file-sink", "", "If set, write to JSONL under this dir instead of zone4")
+		zone3URL    = flag.String("zone3", "http://localhost:8082", "Zone 3 base URL (default ingestion pipeline)")
+		zone4URL    = flag.String("zone4", "", "Zone 4 base URL (direct mutations sink, debug/dev only)")
+		fileSinkDir = flag.String("file-sink", "", "If set, write to JSONL under this dir instead of HTTP sink")
 		configPath  = flag.String("config", "", "Path to zone2 config JSON; if empty, scans CWD as one source")
 	)
 	flag.Parse()
@@ -79,9 +80,12 @@ func main() {
 		}
 		sink = fs
 		log.Printf("[zone2] sink: file → %s", *fileSinkDir)
-	} else {
+	} else if *zone4URL != "" {
 		sink = delivery.NewZone4Sink(*zone4URL)
-		log.Printf("[zone2] sink: zone4 → %s", *zone4URL)
+		log.Printf("[zone2] sink: zone4 (debug/dev direct) → %s", *zone4URL)
+	} else {
+		sink = delivery.NewZone3Sink(*zone3URL)
+		log.Printf("[zone2] sink: zone3 → %s", *zone3URL)
 	}
 
 	cfg, err := loadConfig(*configPath)

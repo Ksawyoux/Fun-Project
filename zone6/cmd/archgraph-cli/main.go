@@ -618,96 +618,100 @@ func findEntityByFileAndLine(ctx context.Context, zone4Addr, namespace string, p
 	if err != nil {
 		return "", err
 	}
+	return resolveEntityByFileAndLine(entities, path, line)
+}
 
-	// Normalize target path
+func resolveEntityByFileAndLine(entities []*Entity, path string, line int) (string, error) {
 	normPath := filepath.Clean(path)
 
-	// First pass: look for exact matches on path or relative path
+	// First pass: file-level match when no line was requested.
 	for _, e := range entities {
-		// 1. Check canonical_name (some files are stored with name=path)
-		if strings.HasSuffix(filepath.Clean(e.CanonicalName), normPath) || strings.HasSuffix(normPath, filepath.Clean(e.CanonicalName)) {
-			if line == 0 {
-				return e.ID, nil
-			}
-		}
-
-		// 2. Check source ref
-		if strings.HasSuffix(filepath.Clean(e.Source.SourceRef), normPath) || strings.HasSuffix(normPath, filepath.Clean(e.Source.SourceRef)) {
-			if line == 0 {
-				return e.ID, nil
-			}
-		}
-
-		// 3. Check properties
-		for _, key := range []string{"path", "filepath", "file"} {
-			if val, ok := e.Properties[key].(string); ok {
-				if strings.HasSuffix(filepath.Clean(val), normPath) || strings.HasSuffix(normPath, filepath.Clean(val)) {
-					if line == 0 {
-						return e.ID, nil
-					}
-				}
-			}
+		if line == 0 && entityMatchesPath(e, normPath) {
+			return e.ID, nil
 		}
 	}
 
-	// Second pass: if line number specified, look for symbol entities containing this line
+	// Second pass: if a line was requested, prefer symbol entities in that file.
 	if line > 0 {
 		for _, e := range entities {
-			// Ensure it belongs to the target file first
-			fileMatch := false
-			if strings.HasSuffix(filepath.Clean(e.Source.SourceRef), normPath) || strings.HasSuffix(normPath, filepath.Clean(e.Source.SourceRef)) {
-				fileMatch = true
-			}
-			if !fileMatch {
-				for _, key := range []string{"path", "filepath", "file"} {
-					if val, ok := e.Properties[key].(string); ok {
-						if strings.HasSuffix(filepath.Clean(val), normPath) || strings.HasSuffix(normPath, filepath.Clean(val)) {
-							fileMatch = true
-							break
-						}
-					}
-				}
-			}
-
-			if fileMatch {
-				// Check line number range
-				startL, hasStart := e.Properties["start_line"]
-				endL, hasEnd := e.Properties["end_line"]
-				exactL, hasExact := e.Properties["line"]
-
-				if hasExact {
-					if lNum, ok := exactL.(float64); ok && int(lNum) == line {
-						return e.ID, nil
-					}
-					if lNum, ok := exactL.(int); ok && lNum == line {
-						return e.ID, nil
-					}
-				}
-
-				if hasStart && hasEnd {
-					sVal, ok1 := startL.(float64)
-					eVal, ok2 := endL.(float64)
-					if ok1 && ok2 && line >= int(sVal) && line <= int(eVal) {
-						return e.ID, nil
-					}
-					sValI, ok1I := startL.(int)
-					eValI, ok2I := endL.(int)
-					if ok1I && ok2I && line >= sValI && line <= eValI {
-						return e.ID, nil
-					}
-				}
+			if entityMatchesPath(e, normPath) && entityMatchesLine(e, line) {
+				return e.ID, nil
 			}
 		}
 	}
 
 	// Third pass fallback: look for any entity where the path is just a substring
 	for _, e := range entities {
-		if strings.Contains(e.CanonicalName, path) || strings.Contains(e.Source.SourceRef, path) {
+		if entityContainsPath(e, path) {
 			return e.ID, nil
 		}
 	}
 
 	return "", fmt.Errorf("no entity found for file %s (line %d)", path, line)
+}
+
+func entityMatchesPath(e *Entity, normPath string) bool {
+	for _, candidate := range entityPathCandidates(e) {
+		clean := filepath.Clean(candidate)
+		if clean == "." || clean == "" {
+			continue
+		}
+		if clean == normPath || strings.HasSuffix(clean, string(filepath.Separator)+normPath) || strings.HasSuffix(normPath, string(filepath.Separator)+clean) {
+			return true
+		}
+	}
+	return false
+}
+
+func entityContainsPath(e *Entity, path string) bool {
+	for _, candidate := range entityPathCandidates(e) {
+		if candidate == "" {
+			continue
+		}
+		if strings.Contains(candidate, path) || strings.Contains(path, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func entityPathCandidates(e *Entity) []string {
+	candidates := []string{e.CanonicalName}
+	if e.Source.SourceRef != "" {
+		candidates = append(candidates, e.Source.SourceRef)
+	}
+	for _, key := range []string{"source_ref", "file", "path", "filepath"} {
+		if val, ok := e.Properties[key].(string); ok && val != "" {
+			candidates = append(candidates, val)
+		}
+	}
+	return candidates
+}
+
+func entityMatchesLine(e *Entity, line int) bool {
+	if exact, ok := intProperty(e.Properties["line"]); ok && exact == line {
+		return true
+	}
+	start, hasStart := intProperty(e.Properties["start_line"])
+	end, hasEnd := intProperty(e.Properties["end_line"])
+	return hasStart && hasEnd && line >= start && line <= end
+}
+
+func intProperty(v any) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case float64:
+		return int(n), true
+	case json.Number:
+		i, err := n.Int64()
+		if err == nil {
+			return int(i), true
+		}
+	}
+	return 0, false
 }
 
 func printBlastRadiusReport(br *BlastRadius) {

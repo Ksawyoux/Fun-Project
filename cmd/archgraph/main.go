@@ -127,7 +127,7 @@ func main() {
 	log.Printf("[archgraph] zone3 is healthy at %s", zone3URL)
 
 	// --- Boot zone2d ---
-	zone2Args := []string{"-addr", zone2Addr, "-state", *zone2State, "-zone4", zone4URL}
+	zone2Args := []string{"-addr", zone2Addr, "-state", *zone2State, "-zone3", zone3URL}
 	if *zone2Config != "" {
 		zone2Args = append(zone2Args, "-config", *zone2Config)
 	}

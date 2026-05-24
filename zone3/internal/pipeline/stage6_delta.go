@@ -123,9 +123,14 @@ func mapNIFEntityToZ4(e *nif.Entity) *z4client.Z4Entity {
 		validFrom = time.Now().UTC()
 	}
 
+	entType := string(e.Type)
+	if entType == "SCHEMA" {
+		entType = "DATABASE_SCHEMA"
+	}
+
 	return &z4client.Z4Entity{
 		ID:             e.ID,
-		Type:           string(e.Type),
+		Type:           entType,
 		SubType:        e.SubType,
 		CanonicalName:  e.Name,
 		Namespace:      e.Namespace,
@@ -156,9 +161,16 @@ func mapNIFRelationshipToZ4(r *nif.Relationship) *z4client.Z4Relationship {
 		validFrom = time.Now().UTC()
 	}
 
+	relType := string(r.Type)
+	if relType == "AUTHORED_BY" {
+		relType = "CONTRIBUTED_TO"
+	} else if relType == "DEPLOYED_TO" {
+		relType = "DEPLOYED_ON"
+	}
+
 	return &z4client.Z4Relationship{
 		ID:         r.ID,
-		Type:       string(r.Type),
+		Type:       relType,
 		FromID:     r.FromEntityID,
 		ToID:       r.ToEntityID,
 		Confidence: r.Confidence,

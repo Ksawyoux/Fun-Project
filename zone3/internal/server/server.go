@@ -23,6 +23,7 @@ func New(pl *pipeline.Pipeline, z4 *z4client.Client) *Server {
 
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/ingest", s.handleBatches)
 	mux.HandleFunc("POST /v1/batches", s.handleBatches)
 	mux.HandleFunc("GET /v1/health", s.handleHealth)
 	return mux

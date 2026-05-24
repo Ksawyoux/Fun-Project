@@ -12,13 +12,13 @@ import "time"
 type EntityType string
 
 const (
-	EntityService       EntityType = "SERVICE"
-	EntityModule        EntityType = "MODULE"
-	EntityFunction      EntityType = "FUNCTION"
-	EntityAPIEndpoint   EntityType = "API_ENDPOINT"
-	EntityDatabaseTable EntityType = "DATABASE_TABLE"
-	EntityTeam          EntityType = "TEAM"
-	EntitySchema        EntityType = "SCHEMA"
+	EntityService        EntityType = "SERVICE"
+	EntityModule         EntityType = "MODULE"
+	EntityFunction       EntityType = "FUNCTION"
+	EntityAPIEndpoint    EntityType = "API_ENDPOINT"
+	EntityDatabaseTable  EntityType = "DATABASE_TABLE"
+	EntityTeam           EntityType = "TEAM"
+	EntityDatabaseSchema EntityType = "DATABASE_SCHEMA"
 )
 
 type RelationshipType string
@@ -33,8 +33,8 @@ const (
 	RelReadsFrom         RelationshipType = "READS_FROM"
 	RelWritesTo          RelationshipType = "WRITES_TO"
 	RelChangeCoupledWith RelationshipType = "CHANGE_COUPLED_WITH"
-	RelAuthoredBy        RelationshipType = "AUTHORED_BY"
-	RelDeployedTo        RelationshipType = "DEPLOYED_TO"
+	RelContributedTo     RelationshipType = "CONTRIBUTED_TO"
+	RelDeployedOn        RelationshipType = "DEPLOYED_ON"
 )
 
 // SourceInfo is the per-record provenance the spec mandates. Every NIF
