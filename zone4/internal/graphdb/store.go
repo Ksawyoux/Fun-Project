@@ -42,6 +42,9 @@ func Open(path string) (*Store, error) {
 	if path != ":memory:" {
 		dir := filepath.Dir(path)
 		if err := os.MkdirAll(dir, 0755); err != nil {
+			if os.IsPermission(err) {
+				return nil, fmt.Errorf("create database directory %q: %w (tip: if deploying on Render, you must attach a Persistent Disk mounted at %q, or change the start command flags to use a relative path like %q or %q)", dir, err, dir, "./"+filepath.Base(path), "data/"+filepath.Base(path))
+			}
 			return nil, fmt.Errorf("create database directory: %w", err)
 		}
 	}

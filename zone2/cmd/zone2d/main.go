@@ -50,6 +50,9 @@ func main() {
 	flag.Parse()
 
 	if err := os.MkdirAll(*stateDir, 0o755); err != nil {
+		if os.IsPermission(err) {
+			log.Fatalf("state dir %q: %v (tip: if deploying on Render, you must attach a Persistent Disk mounted at the target directory, or use a relative path)", *stateDir, err)
+		}
 		log.Fatalf("state dir: %v", err)
 	}
 

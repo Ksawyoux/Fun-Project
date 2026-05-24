@@ -51,6 +51,9 @@ func Open(dbPath string) (*Registry, error) {
 	if dbPath != ":memory:" {
 		dir := filepath.Dir(dbPath)
 		if err := os.MkdirAll(dir, 0755); err != nil {
+			if os.IsPermission(err) {
+				return nil, fmt.Errorf("create registry db directory %q: %w (tip: if deploying on Render, you must attach a Persistent Disk mounted at %q, or change the start command flags to use a relative path like %q or %q)", dir, err, dir, "./"+filepath.Base(dbPath), "data/"+filepath.Base(dbPath))
+			}
 			return nil, fmt.Errorf("create registry db directory: %w", err)
 		}
 	}
