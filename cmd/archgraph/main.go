@@ -215,16 +215,23 @@ func main() {
 	}
 }
 
-// startZone launches `go run <pkg> <args...>` in `dir` and returns the
-// started *exec.Cmd. Output is forwarded to the parent stdout/stderr with a
-// per-zone prefix so two daemons interleave readably.
-//
-// `go run` (not `go build` + exec) is deliberate: it keeps the supervisor
-// stateless and avoids stale-binary footguns. The trade-off is a slow first
-// start (the Go compiler runs); subsequent starts hit the build cache.
 func startZone(ctx context.Context, label, dir, pkg string, args ...string) (*exec.Cmd, error) {
-	cmdArgs := append([]string{"run", pkg}, args...)
-	cmd := exec.CommandContext(ctx, "go", cmdArgs...)
+	binaryName := filepath.Base(pkg)
+	binaryPath := filepath.Join(dir, binaryName)
+	if !fileExists(binaryPath) {
+		if fileExists(binaryPath + ".exe") {
+			binaryName += ".exe"
+			binaryPath += ".exe"
+		}
+	}
+
+	var cmd *exec.Cmd
+	if fileExists(binaryPath) {
+		cmd = exec.CommandContext(ctx, "./"+binaryName, args...)
+	} else {
+		cmdArgs := append([]string{"run", pkg}, args...)
+		cmd = exec.CommandContext(ctx, "go", cmdArgs...)
+	}
 	cmd.Dir = dir
 
 	// Filter out Go module environment variables to prevent module resolution conflicts in child go processes
@@ -301,6 +308,11 @@ func waitHealthy(ctx context.Context, url string, timeout time.Duration) error {
 func dirExists(p string) bool {
 	info, err := os.Stat(p)
 	return err == nil && info.IsDir()
+}
+
+func fileExists(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && !info.IsDir()
 }
 
 // isSignalErr returns true if the error came from the child being signalled
