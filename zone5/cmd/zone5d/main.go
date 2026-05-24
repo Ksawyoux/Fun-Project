@@ -27,9 +27,24 @@ func main() {
 
 	cl := zone4client.New(*zone4URL)
 
-	// LLM adapter: stub by default. Production would init an Anthropic
-	// client here based on env (ANTHROPIC_API_KEY) and pass its name.
-	reason := reasoner.New(reasoner.StubLLM{}, "stub")
+	// LLM adapter: prefer the local `claude` CLI (Claude Code) so we get
+	// real model power using whatever login the host already has — no API
+	// key required. Fall back to the deterministic stub if the binary
+	// isn't installed, so the pipeline still works offline / in tests.
+	// Set ARCHGRAPH_FORCE_STUB=1 to force the stub even when claude exists.
+	var (
+		llm     reasoner.LLM = reasoner.StubLLM{}
+		llmName              = "stub"
+	)
+	if os.Getenv("ARCHGRAPH_FORCE_STUB") == "" {
+		if cli, err := reasoner.NewClaudeCLI(os.Getenv("CLAUDE_BIN")); err == nil {
+			llm = cli
+			llmName = "claude-cli"
+		} else {
+			log.Printf("claude CLI not available, using stub reasoner: %v", err)
+		}
+	}
+	reason := reasoner.New(llm, llmName)
 
 	srv := server.New(cl, reason)
 	httpSrv := &http.Server{
