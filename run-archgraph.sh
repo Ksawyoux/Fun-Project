@@ -47,6 +47,66 @@ if [ -n "$PID_TO_KILL" ]; then
   kill -9 $PID_TO_KILL 2>/dev/null || true
 fi
 
+# Detect languages present in the target repo. We always ingest git history;
+# AST ingestion is enabled per-language based on what files exist.
+# Skip common dependency / build dirs so we don't false-positive on vendored code.
+has_ext() {
+  # Args: one or more bare extensions (e.g. ts tsx). Returns 0 if any matching
+  # file exists under $REPO_PATH outside ignored directories.
+  local name_args=()
+  local ext
+  for ext in "$@"; do
+    if [ ${#name_args[@]} -eq 0 ]; then
+      name_args+=( -name "*.$ext" )
+    else
+      name_args+=( -o -name "*.$ext" )
+    fi
+  done
+  [ -n "$(find "$REPO_PATH" \
+      -type d \( -name vendor -o -name node_modules -o -name .git -o -name .venv -o -name venv -o -name __pycache__ -o -name dist -o -name build -o -name target -o -name .next \) -prune \
+      -o -type f \( "${name_args[@]}" \) -print -quit 2>/dev/null)" ]
+}
+
+DETECTED=()
+SUPPORTED=()
+UNSUPPORTED=()
+
+if has_ext go;             then DETECTED+=("go");         SUPPORTED+=("go"); fi
+if has_ext py;             then DETECTED+=("python");     UNSUPPORTED+=("python"); fi
+if has_ext ts tsx;         then DETECTED+=("typescript"); UNSUPPORTED+=("typescript"); fi
+if has_ext js jsx mjs;     then DETECTED+=("javascript"); UNSUPPORTED+=("javascript"); fi
+if has_ext rs;             then DETECTED+=("rust");       UNSUPPORTED+=("rust"); fi
+if has_ext java kt;        then DETECTED+=("jvm");        UNSUPPORTED+=("jvm"); fi
+if has_ext rb;             then DETECTED+=("ruby");       UNSUPPORTED+=("ruby"); fi
+
+if [ ${#DETECTED[@]} -eq 0 ]; then
+  echo -e "${YELLOW}⚠️  No recognized source files found — ingesting git history only.${NC}"
+else
+  echo -e "${BLUE}[1/5] Languages detected:${NC} ${DETECTED[*]}"
+fi
+if [ ${#UNSUPPORTED[@]} -gt 0 ]; then
+  echo -e "${YELLOW}    AST parsers not yet wired for: ${UNSUPPORTED[*]} (git history will still be ingested).${NC}"
+fi
+
+# Build the ast_go block only if Go files are present.
+AST_GO_BLOCK=""
+for lang in "${SUPPORTED[@]}"; do
+  if [ "$lang" = "go" ]; then
+    AST_GO_BLOCK=$(cat <<EOF
+,
+  "ast_go": [
+    {
+      "source_id": "auto-scan",
+      "root_path": "$REPO_PATH",
+      "namespace": "$NAMESPACE",
+      "ignore_dirs": ["vendor", "node_modules", ".venv", "venv", "__pycache__", "dist", "build", "target", ".next"]
+    }
+  ]
+EOF
+)
+  fi
+done
+
 # Generate a temporary sources.json for Zone 2
 CONFIG_PATH="/tmp/archgraph_sources.json"
 echo -e "${BLUE}[2/5] Generating ingestion config at:${NC} $CONFIG_PATH"
@@ -58,15 +118,7 @@ cat <<EOF > "$CONFIG_PATH"
       "repo_path": "$REPO_PATH",
       "namespace": "$NAMESPACE"
     }
-  ],
-  "ast_go": [
-    {
-      "source_id": "auto-scan",
-      "root_path": "$REPO_PATH",
-      "namespace": "$NAMESPACE",
-      "ignore_dirs": ["vendor", "node_modules"]
-    }
-  ]
+  ]$AST_GO_BLOCK
 }
 EOF
 

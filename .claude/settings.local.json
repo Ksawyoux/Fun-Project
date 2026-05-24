@@ -17,7 +17,10 @@
       "Bash(xargs sed -i '' 's|archgraph/zone2/internal/nif|archgraph/nif|g; s|archgraph/zone3/internal/nif|archgraph/nif|g')",
       "Bash(make test *)",
       "Bash(curl -s \"http://localhost:8080/v1/entities?namespace=acme\")",
-      "Bash(sqlite3 zone4/zone4.db \"SELECT type, canonical_name, namespace FROM entities LIMIT 30\")"
+      "Bash(sqlite3 zone4/zone4.db \"SELECT type, canonical_name, namespace FROM entities LIMIT 30\")",
+      "Bash(sqlite3 zone4/zone4.db \"SELECT namespace, type, sub_type, COUNT\\(*\\) FROM entities GROUP BY namespace, type, sub_type ORDER BY namespace, type\")",
+      "Bash(sqlite3 zone4/zone4.db \"SELECT type, sub_type, canonical_name FROM entities WHERE properties LIKE '%Kop Tech%' OR canonical_name LIKE '%Kop%' LIMIT 30\")",
+      "Bash(bash -n /Users/MacBook/Fun_Project/Fun-Project/run-archgraph.sh)"
     ]
   },
   "enabledMcpjsonServers": [
