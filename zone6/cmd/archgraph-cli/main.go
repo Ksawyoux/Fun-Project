@@ -763,14 +763,118 @@ func handleGraph(ctx context.Context, zone4Addr, namespace string, args []string
 		fmt.Println("```mermaid")
 		fmt.Println("flowchart TD")
 
-		// Define nodes
+		// Create a lookup map for entities by ID
+		entitiesByID := make(map[string]*Entity)
+		for _, e := range listing.Entities {
+			entitiesByID[e.ID] = e
+		}
+
+		// Helper to check if a relationship is containment (file belongs to project)
+		isContainment := func(r *Relationship) bool {
+			if r.Type != "DEPENDS_ON" {
+				return false
+			}
+			target, ok := entitiesByID[r.ToID]
+			if !ok {
+				return false
+			}
+			source, ok := entitiesByID[r.FromID]
+			if !ok {
+				return false
+			}
+			return target.SubType == "project" && source.Type == "MODULE"
+		}
+
+		// Helper to sanitize path for Mermaid node ID
+		sanitizePathForID := func(path string) string {
+			var sb strings.Builder
+			sb.WriteString("dir_")
+			for _, r := range path {
+				if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+					sb.WriteRune(r)
+				} else {
+					sb.WriteRune('_')
+				}
+			}
+			res := sb.String()
+			for strings.Contains(res, "__") {
+				res = strings.ReplaceAll(res, "__", "_")
+			}
+			return res
+		}
+
+		// Tracks folders we've created
+		folderNodes := make(map[string]string) // path -> folderNodeID
+		folderLabels := make(map[string]string) // folderNodeID -> folderName
+		type linkKey struct {
+			from string
+			to   string
+		}
+		parentChildLinks := make(map[linkKey]bool)
+
+		// Set of leaf nodes that are placed inside the tree structure
+		inTree := make(map[string]bool)
+
+		// 1. Trace all containment relationships and build directory tree structure
+		for _, r := range listing.Relationships {
+			if isContainment(r) {
+				fileEnt := entitiesByID[r.FromID]
+				projEnt := entitiesByID[r.ToID]
+
+				parts := strings.Split(fileEnt.CanonicalName, "/")
+				prevID := projEnt.ID
+				var currentPath string
+
+				for i := 0; i < len(parts)-1; i++ {
+					if currentPath == "" {
+						currentPath = parts[i]
+					} else {
+						currentPath = currentPath + "/" + parts[i]
+					}
+
+					dirID := sanitizePathForID(currentPath)
+					if _, exists := folderNodes[currentPath]; !exists {
+						folderNodes[currentPath] = dirID
+						folderLabels[dirID] = parts[i]
+					}
+
+					parentChildLinks[linkKey{from: prevID, to: dirID}] = true
+					prevID = dirID
+				}
+
+				// Connect the last directory node (or root) to the file node itself
+				parentChildLinks[linkKey{from: prevID, to: fileEnt.ID}] = true
+				inTree[fileEnt.ID] = true
+			}
+		}
+
+		// 2. Define folder nodes
+		for dirID, folderName := range folderLabels {
+			fmt.Printf("    %s[\"📂 %s\"]\n", dirID, folderName)
+		}
+
+		// 3. Define original entity nodes
 		for _, e := range listing.Entities {
 			cleanName := strings.ReplaceAll(e.CanonicalName, "\"", "\\\"")
+			// If the entity is inside the tree, we only display the basename for readability
+			if inTree[e.ID] {
+				parts := strings.Split(e.CanonicalName, "/")
+				cleanName = parts[len(parts)-1]
+				cleanName = strings.ReplaceAll(cleanName, "\"", "\\\"")
+			}
 			fmt.Printf("    %s[\"%s (%s)\"]\n", e.ID, cleanName, e.Type)
 		}
 
-		// Define connections
+		// 4. Output the directory tree structure links
+		for link := range parentChildLinks {
+			fmt.Printf("    %s --> %s\n", link.from, link.to)
+		}
+
+		// 5. Output other relationships (cross-file dependencies, calls, etc.)
 		for _, r := range listing.Relationships {
+			if isContainment(r) {
+				continue
+			}
 			fmt.Printf("    %s -->|%s| %s\n", r.FromID, r.Type, r.ToID)
 		}
 
