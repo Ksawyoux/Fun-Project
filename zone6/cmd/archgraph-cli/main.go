@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"embed"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -20,6 +22,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
+
+//go:embed web/*
+var webFS embed.FS
 
 // API models mirroring Zone 4 and Zone 5 schemas
 type AskReq struct {
@@ -201,6 +206,10 @@ func main() {
 		handleDocument(ctx, *zone4Addr, *zone5Addr, cfg, subArgs)
 	case "mcp":
 		handleMCP(ctx, *zone4Addr, *zone5Addr, cfg.Namespace)
+	case "dashboard":
+		handleDashboard(ctx, *zone4Addr, *zone5Addr, cfg.Namespace, subArgs)
+	case "analyze-pr":
+		handleAnalyzePR(ctx, *zone4Addr, *zone5Addr, cfg, subArgs)
 	default:
 		fmt.Printf("Unknown subcommand: %s\n", subcommand)
 		printUsage()
@@ -223,6 +232,8 @@ func printUsage() {
 	fmt.Println("  validate [--detail]                  Validate codebase structures against governance rules")
 	fmt.Println("  document [--out <file>]             Generate markdown documentation for the codebase")
 	fmt.Println("  mcp                                 Run as a Model Context Protocol (MCP) server over stdio")
+	fmt.Println("  dashboard [--port <port>]           Launch the interactive Web Dashboard")
+	fmt.Println("  analyze-pr [--base-ref <ref>] [--head-ref <ref>] Evaluate pull request changes")
 }
 
 func loadConfig(path string) (*Config, error) {
@@ -2140,4 +2151,256 @@ func generateDocumentation(ctx context.Context, zone4Addr, zone5Addr, namespace 
 	sb.WriteString("- **CHANGE_COUPLED_WITH:** Relationship inferring structural or data coupling from shared resources.\n")
 
 	return sb.String(), nil
+}
+
+func handleDashboard(ctx context.Context, zone4Addr, zone5Addr, namespace string, args []string) {
+	port := "8084"
+	fsCmd := flag.NewFlagSet("dashboard", flag.ExitOnError)
+	fsCmd.StringVar(&port, "port", "8084", "Dashboard web server port")
+	_ = fsCmd.Parse(args)
+
+	// Create sub-FS for the web files
+	subFS, err := fs.Sub(webFS, "web")
+	if err != nil {
+		fmt.Printf("Error creating web filesystem sub-fs: %v\n", err)
+		os.Exit(1)
+	}
+
+	mux := http.NewServeMux()
+	// Serve dynamic config
+	mux.HandleFunc("/api/config", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"zone4":     zone4Addr,
+			"zone5":     zone5Addr,
+			"namespace": namespace,
+		})
+	})
+	// Serve static files
+	mux.Handle("/", http.FileServer(http.FS(subFS)))
+
+	serverAddr := ":" + port
+	fmt.Printf("🚀 Starting Web Dashboard on http://localhost:%s ...\n", port)
+	fmt.Printf("Connecting to Zone 5 at %s\n", zone5Addr)
+
+	// Attempt to open the web browser automatically
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		openBrowser("http://localhost:" + port)
+	}()
+
+	if err := http.ListenAndServe(serverAddr, mux); err != nil {
+		fmt.Printf("Dashboard server failed: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func openBrowser(url string) {
+	// Attempt to run open on macOS
+	if exec.Command("open", url).Start() == nil {
+		return
+	}
+	// Attempt to run xdg-open on Linux
+	if exec.Command("xdg-open", url).Start() == nil {
+		return
+	}
+	// Fallback to cmd on Windows
+	_ = exec.Command("cmd", "/c", "start", url).Start()
+}
+
+func handleAnalyzePR(ctx context.Context, zone4Addr, zone5Addr string, cfg *Config, args []string) {
+	var baseRef string
+	var headRef string
+	var outFile string
+
+	fsCmd := flag.NewFlagSet("analyze-pr", flag.ExitOnError)
+	fsCmd.StringVar(&baseRef, "base-ref", "origin/main", "Base Git reference (e.g. origin/main)")
+	fsCmd.StringVar(&headRef, "head-ref", "HEAD", "Head Git reference (e.g. HEAD)")
+	fsCmd.StringVar(&outFile, "out", "", "Output file path for the markdown comment (prints to stdout if empty)")
+	_ = fsCmd.Parse(args)
+
+	// 1. Get modified files from git diff
+	modifiedFiles, err := getModifiedFiles(baseRef, headRef)
+	if err != nil {
+		fmt.Printf("Error getting modified files: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(modifiedFiles) == 0 {
+		fmt.Println("No modified files detected between references.")
+		return
+	}
+
+	// 2. Resolve entities and compute blast radius
+	type prImpact struct {
+		File     string
+		EntityID string
+		Entity   *Entity
+		Radius   *BlastRadius
+	}
+	var impacts []prImpact
+
+	for _, file := range modifiedFiles {
+		resolvedID, err := findEntityByFileAndLine(ctx, zone4Addr, cfg.Namespace, file, 0)
+		if err != nil {
+			// File might not map to a graph entity, skip it
+			continue
+		}
+		// Fetch entity details from Zone 5
+		u := fmt.Sprintf("%s/v1/entities/%s", zone5Addr, url.PathEscape(resolvedID))
+		resp, err := http.Get(u)
+		if err != nil {
+			continue
+		}
+		var ent Entity
+		if json.NewDecoder(resp.Body).Decode(&ent) == nil {
+			// Get blast radius
+			reqBody, _ := json.Marshal(map[string]any{
+				"entity_id": resolvedID,
+				"max_depth": 3,
+			})
+			respBR, err := postJSON(ctx, zone5Addr+"/v1/blast-radius", reqBody)
+			if err == nil {
+				var br BlastRadius
+				if json.NewDecoder(respBR.Body).Decode(&br) == nil {
+					impacts = append(impacts, prImpact{
+						File:     file,
+						EntityID: resolvedID,
+						Entity:   &ent,
+						Radius:   &br,
+					})
+				}
+				respBR.Body.Close()
+			}
+		}
+		resp.Body.Close()
+	}
+
+	// 3. Get health audit smells
+	var smells []Smell
+	reqBody, _ := json.Marshal(map[string]string{"namespace": cfg.Namespace})
+	resp, err := postJSON(ctx, zone5Addr+"/v1/health-audit", reqBody)
+	if err == nil {
+		var hr HealthReport
+		if json.NewDecoder(resp.Body).Decode(&hr) == nil {
+			smells = hr.Smells
+		}
+		resp.Body.Close()
+	}
+
+	// 4. Generate Markdown
+	var sb strings.Builder
+	sb.WriteString("## 🏗️ ArchGraph Pull Request Analysis\n\n")
+	sb.WriteString("This PR was analyzed by **ArchGraph** to assess architectural risks and dependency impact.\n\n")
+
+	if len(impacts) > 0 {
+		sb.WriteString("### 🛡️ Downstream Blast Radius\n")
+		sb.WriteString("The following table shows the downstream systems and services impacted by files modified in this PR:\n\n")
+		sb.WriteString("| Modified File | Resolved Entity | Impacted Downstreams | Risk Rating |\n")
+		sb.WriteString("|---|---|---|---|\n")
+
+		for _, imp := range impacts {
+			impactedCount := imp.Radius.TotalAffected
+			risk := "Low"
+			if impactedCount > 5 {
+				risk = "🔴 High"
+			} else if impactedCount > 2 {
+				risk = "🟡 Medium"
+			} else {
+				risk = "🟢 Low"
+			}
+
+			downstreamNames := []string{}
+			for _, node := range imp.Radius.Affected {
+				if node.Type == "SERVICE" || node.Type == "API_ENDPOINT" {
+					downstreamNames = append(downstreamNames, fmt.Sprintf("`%s` (%s)", node.CanonicalName, node.Type))
+				}
+			}
+			downstreamStr := strings.Join(downstreamNames, ", ")
+			if downstreamStr == "" {
+				downstreamStr = "None"
+			}
+			if len(downstreamStr) > 80 {
+				downstreamStr = downstreamStr[:77] + "..."
+			}
+
+			sb.WriteString(fmt.Sprintf("| `%s` | `%s` (%s) | %s | %s |\n", imp.File, imp.Entity.CanonicalName, imp.Entity.Type, downstreamStr, risk))
+		}
+		sb.WriteString("\n")
+	} else {
+		sb.WriteString("✅ **No architectural entities affected**: The modified files do not impact any registered service or module boundaries.\n\n")
+	}
+
+	// Filter smells related to the modified files/entities
+	var relevantSmells []Smell
+	for _, smell := range smells {
+		isRelevant := false
+		for _, nodeName := range smell.Nodes {
+			for _, imp := range impacts {
+				if strings.Contains(imp.Entity.CanonicalName, nodeName) || strings.Contains(nodeName, imp.Entity.CanonicalName) {
+					isRelevant = true
+					break
+				}
+			}
+			if isRelevant {
+				break
+			}
+		}
+		if isRelevant {
+			relevantSmells = append(relevantSmells, smell)
+		}
+	}
+
+	if len(relevantSmells) > 0 {
+		sb.WriteString("### ⚠️ Architectural Violations & Smells\n")
+		sb.WriteString("The changes in this PR affect entities with existing architectural smells or introduce new structural risks:\n\n")
+		for _, smell := range relevantSmells {
+			severityEmoji := "⚠️"
+			if smell.Severity == "FAIL" || smell.Severity == "HIGH" {
+				severityEmoji = "❌"
+			}
+			sb.WriteString(fmt.Sprintf("- %s **[%s]**: %s (Affects nodes: %v)\n", severityEmoji, smell.Type, smell.Message, smell.Nodes))
+		}
+		sb.WriteString("\n")
+	} else {
+		sb.WriteString("✅ **Architecture Governance Clean**: No structural smells or policy violations detected for modified components.\n\n")
+	}
+
+	sb.WriteString("*(For a full interactive graph representation and timeline playback, launch the **ArchGraph Dashboard** locally via `archgraph dashboard`.)*\n")
+
+	mdContent := sb.String()
+	if outFile != "" {
+		err := os.WriteFile(outFile, []byte(mdContent), 0644)
+		if err != nil {
+			fmt.Printf("Error writing out file: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("PR impact report written to %s\n", outFile)
+	} else {
+		fmt.Println(mdContent)
+	}
+}
+
+func getModifiedFiles(base, head string) ([]string, error) {
+	cmd := exec.Command("git", "diff", "--name-only", base+"..."+head)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		// Fallback to git diff base head if base...head fails
+		cmd = exec.Command("git", "diff", "--name-only", base, head)
+		out.Reset()
+		cmd.Stdout = &out
+		if err := cmd.Run(); err != nil {
+			return nil, err
+		}
+	}
+	var files []string
+	scanner := bufio.NewScanner(&out)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" {
+			files = append(files, line)
+		}
+	}
+	return files, nil
 }

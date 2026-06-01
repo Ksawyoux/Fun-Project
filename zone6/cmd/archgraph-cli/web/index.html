@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ArchGraph Live Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- TOP NAVIGATION BAR -->
+        <header class="top-nav">
+            <div class="brand">
+                <span class="logo">🏗️</span>
+                <div class="brand-text">
+                    <h1>ArchGraph</h1>
+                    <span class="tagline">System Blueprint & Governance</span>
+                </div>
+            </div>
+            <div class="stats-bar">
+                <div class="stat-badge">
+                    <span class="label">Namespace</span>
+                    <span class="value" id="stat-namespace">--</span>
+                </div>
+                <div class="stat-badge">
+                    <span class="label">Entities</span>
+                    <span class="value" id="stat-entities">0</span>
+                </div>
+                <div class="stat-badge">
+                    <span class="label">Relationships</span>
+                    <span class="value" id="stat-relationships">0</span>
+                </div>
+                <div class="stat-badge" id="stat-health-badge">
+                    <span class="label">Status</span>
+                    <span class="value" id="stat-health">Healthy</span>
+                </div>
+            </div>
+            <div class="server-status">
+                <span class="indicator connected"></span>
+                <span class="status-text">Connected</span>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <!-- LEFT CONTROL & SMMELLS PANEL -->
+            <aside class="left-panel glass">
+                <div class="panel-section">
+                    <h2>Filter Tiers</h2>
+                    <div class="filter-group">
+                        <label class="checkbox-container">
+                            <input type="checkbox" id="filter-services" checked>
+                            <span class="checkmark service"></span>
+                            Services (Tier 2)
+                        </label>
+                        <label class="checkbox-container">
+                            <input type="checkbox" id="filter-modules" checked>
+                            <span class="checkmark module"></span>
+                            Modules (Tier 3)
+                        </label>
+                        <label class="checkbox-container">
+                            <input type="checkbox" id="filter-functions" checked>
+                            <span class="checkmark function"></span>
+                            Functions (Tier 4)
+                        </label>
+                        <label class="checkbox-container">
+                            <input type="checkbox" id="filter-endpoints" checked>
+                            <span class="checkmark endpoint"></span>
+                            API Endpoints (Tier 2)
+                        </label>
+                        <label class="checkbox-container">
+                            <input type="checkbox" id="filter-databases" checked>
+                            <span class="checkmark database"></span>
+                            Databases (Tier 3)
+                        </label>
+                    </div>
+                </div>
+
+                <div class="panel-section smells-section">
+                    <h2>🏥 Architectural Health</h2>
+                    <div class="smells-summary">
+                        <span id="smells-count">0 smells detected</span>
+                    </div>
+                    <div class="smells-list" id="smells-list">
+                        <!-- Dynamic smells list -->
+                        <div class="no-smells">✅ Governance checks passing</div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- GRAPH VIEWPORT -->
+            <main class="viewport-area">
+                <div class="viewport-overlay">
+                    <div class="controls-overlay">
+                        <button id="btn-zoom-in" title="Zoom In">+</button>
+                        <button id="btn-zoom-out" title="Zoom Out">-</button>
+                        <button id="btn-reset" title="Recenter Graph">Recenter</button>
+                    </div>
+                    <div class="legend-overlay">
+                        <div class="legend-item"><span class="color-dot service"></span>Service</div>
+                        <div class="legend-item"><span class="color-dot module"></span>Module</div>
+                        <div class="legend-item"><span class="color-dot function"></span>Function</div>
+                        <div class="legend-item"><span class="color-dot endpoint"></span>API</div>
+                        <div class="legend-item"><span class="color-dot database"></span>Database</div>
+                    </div>
+                </div>
+                <canvas id="graph-canvas"></canvas>
+            </main>
+
+            <!-- RIGHT DETAIL & Q&A PANEL -->
+            <aside class="right-panel glass">
+                <!-- NODE DETAIL TAB -->
+                <div class="tab-container">
+                    <button class="tab-btn active" id="tab-inspector">Inspector</button>
+                    <button class="tab-btn" id="tab-ask">AI Q&A Assistant</button>
+                </div>
+
+                <!-- INSPECTOR PANEL -->
+                <div class="tab-content" id="panel-inspector">
+                    <div id="inspector-empty" class="panel-empty">
+                        <span class="empty-icon">🔍</span>
+                        <p>Click an entity node to inspect its properties, dependencies, and blast radius.</p>
+                    </div>
+                    <div id="inspector-details" class="details-content hidden">
+                        <div class="detail-header">
+                            <span class="badge" id="ent-badge">MODULE</span>
+                            <h3 id="ent-name">billing-service</h3>
+                            <p class="subtitle" id="ent-subtype">go_package</p>
+                        </div>
+                        
+                        <div class="actions-group">
+                            <button id="btn-blast-radius" class="action-btn radius">🛡️ Analyze Blast Radius</button>
+                            <button id="btn-clear-analysis" class="action-btn hidden">✖️ Clear Analysis</button>
+                        </div>
+
+                        <div class="property-group">
+                            <h4>Provenance</h4>
+                            <table class="properties-table">
+                                <tr><td>ID</td><td><code id="ent-id">--</code></td></tr>
+                                <tr><td>Source ID</td><td id="ent-source-id">--</td></tr>
+                                <tr><td>Observed At</td><td id="ent-observed">--</td></tr>
+                                <tr><td>Confidence</td><td id="ent-confidence">--</td></tr>
+                            </table>
+                        </div>
+
+                        <div class="property-group">
+                            <h4>Properties</h4>
+                            <div id="ent-custom-properties" class="custom-properties">
+                                <!-- Dynamic properties -->
+                            </div>
+                        </div>
+
+                        <div class="property-group">
+                            <h4>Dependencies</h4>
+                            <div class="dep-counts">
+                                <div class="dep-badge">Inbound: <span id="ent-inbound-count">0</span></div>
+                                <div class="dep-badge">Outbound: <span id="ent-outbound-count">0</span></div>
+                            </div>
+                            <div id="ent-dep-list" class="dep-list">
+                                <!-- Dynamic dependencies -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Q&A NARRATIVE PANEL -->
+                <div class="tab-content hidden" id="panel-ask">
+                    <div class="qa-container">
+                        <div class="chat-history" id="chat-history">
+                            <div class="chat-message system">
+                                🤖 Write a natural language question to ask the ArchGraph intelligence layer (e.g. "What is the blast radius of modifying user-service?" or "Are there any circular dependencies?").
+                            </div>
+                        </div>
+                        <div class="chat-input-area">
+                            <textarea id="chat-input" placeholder="Type your architecture question..."></textarea>
+                            <button id="btn-send-question">Ask Engine</button>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+        </div>
+
+        <!-- BOTTOM TIMELINE EVOLUTION PLAYER -->
+        <footer class="bottom-timeline glass">
+            <div class="timeline-controls">
+                <button id="btn-play-timeline" class="play-btn">▶ Play</button>
+                <div class="timeline-slider-container">
+                    <input type="range" id="timeline-slider" min="0" max="0" value="0">
+                    <div class="timeline-ticks" id="timeline-ticks"></div>
+                </div>
+            </div>
+            <div class="timeline-meta">
+                <div class="meta-item">
+                    <span class="lbl">Commit/Time:</span>
+                    <span class="val" id="timeline-commit-time">Initial Snapshot</span>
+                </div>
+                <div class="meta-item truncate">
+                    <span class="lbl">Mutation:</span>
+                    <span class="val" id="timeline-mutation-desc">None</span>
+                </div>
+            </div>
+        </footer>
+    </div>
+    
+    <script src="app.js"></script>
+</body>
+</html>

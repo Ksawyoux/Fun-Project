@@ -36,10 +36,22 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /v1/health-audit", s.handleHealthAudit)
 	mux.HandleFunc("POST /v1/diff", s.handleDiff)
 	mux.HandleFunc("GET /v1/entities/{id}", s.handleGetEntity)
+	mux.HandleFunc("GET /v1/entities", s.handleListEntities)
+	mux.HandleFunc("GET /v1/log", s.handleReadLog)
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
-	return mux
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+		w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
 }
 
 // --- /v1/ask --- the natural-language query path.
@@ -274,4 +286,43 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 
 func writeError(w http.ResponseWriter, status int, code, msg string) {
 	writeJSON(w, status, map[string]string{"error": code, "message": msg})
+}
+
+func (s *Server) handleListEntities(w http.ResponseWriter, r *http.Request) {
+	ns := r.URL.Query().Get("namespace")
+	if ns == "" {
+		writeError(w, http.StatusBadRequest, "missing_namespace", "namespace query parameter required")
+		return
+	}
+	listing, err := s.cl.ListNamespace(r.Context(), ns)
+	if err != nil {
+		writeClientErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, listing)
+}
+
+func (s *Server) handleReadLog(w http.ResponseWriter, r *http.Request) {
+	var opts zone4client.ReadLogOpts
+	opts.EntityID = r.URL.Query().Get("entity_id")
+	opts.RelationshipID = r.URL.Query().Get("relationship_id")
+	opts.TransactionID = r.URL.Query().Get("transaction_id")
+	if v := r.URL.Query().Get("from_entry_id"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err == nil {
+			opts.FromEntryID = n
+		}
+	}
+	if v := r.URL.Query().Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err == nil {
+			opts.Limit = n
+		}
+	}
+	entries, err := s.cl.ReadLog(r.Context(), opts)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "log_read_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"entries": entries})
 }
