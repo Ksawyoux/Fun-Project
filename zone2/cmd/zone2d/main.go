@@ -35,8 +35,11 @@ import (
 // per Go codebase. If left empty, the daemon falls back to a single default
 // source rooted at the current working directory — handy for a quick demo.
 type Config struct {
-	Git   []ingestor.GitConfig   `json:"git"`
-	GoAST []ingestor.GoASTConfig `json:"ast_go"`
+	Git        []ingestor.GitConfig           `json:"git"`
+	GoAST      []ingestor.GoASTConfig         `json:"ast_go"`
+	PythonAST  []ingestor.PythonASTConfig     `json:"ast_python"`
+	TypeScript []ingestor.TypeScriptASTConfig `json:"ast_ts"`
+	OpenAPI    []ingestor.OpenAPIConfig       `json:"openapi"`
 }
 
 func main() {
@@ -105,6 +108,24 @@ func main() {
 			log.Fatalf("register ast-go %s: %v", a.SourceID, err)
 		}
 		log.Printf("[zone2] registered ast-go:%s (%s)", a.SourceID, a.RootPath)
+	}
+	for _, p := range cfg.PythonAST {
+		if err := reg.Register(ingestor.NewPythonAST(p)); err != nil {
+			log.Fatalf("register ast-python %s: %v", p.SourceID, err)
+		}
+		log.Printf("[zone2] registered ast-python:%s (%s)", p.SourceID, p.RootPath)
+	}
+	for _, t := range cfg.TypeScript {
+		if err := reg.Register(ingestor.NewTypeScriptAST(t)); err != nil {
+			log.Fatalf("register ast-ts %s: %v", t.SourceID, err)
+		}
+		log.Printf("[zone2] registered ast-ts:%s (%s)", t.SourceID, t.RootPath)
+	}
+	for _, o := range cfg.OpenAPI {
+		if err := reg.Register(ingestor.NewOpenAPI(o)); err != nil {
+			log.Fatalf("register openapi %s: %v", o.SourceID, err)
+		}
+		log.Printf("[zone2] registered openapi:%s (%s)", o.SourceID, o.RootPath)
 	}
 
 	runner := &orchestrator.Runner{

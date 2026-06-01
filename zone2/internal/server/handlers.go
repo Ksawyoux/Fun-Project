@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"time"
 
+	"archgraph/nif"
 	"archgraph/zone2/internal/ledger"
 	"archgraph/zone2/internal/orchestrator"
 )
@@ -39,6 +40,8 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /v1/ingestors", s.listIngestors)
 	mux.HandleFunc("GET /v1/staleness", s.staleness)
 	mux.HandleFunc("GET /v1/health", s.health)
+	mux.HandleFunc("POST /v1/webhooks/github", s.handleGithubWebhook)
+	mux.HandleFunc("POST /v1/traces", s.handleTraces)
 	return mux
 }
 
@@ -188,4 +191,128 @@ func intParam(r *http.Request, key string, def int) int {
 		return def
 	}
 	return n
+}
+
+type Span struct {
+	TraceID      string `json:"trace_id"`
+	SpanID       string `json:"span_id"`
+	ParentSpanID string `json:"parent_span_id,omitempty"`
+	ServiceName  string `json:"service_name"`
+	Name         string `json:"name"`
+}
+
+func (s *Server) handleGithubWebhook(w http.ResponseWriter, r *http.Request) {
+	go func() {
+		_, err := s.Runner.RunAll(context.Background(), "webhook:github")
+		if err != nil {
+			log.Printf("[zone2] github webhook run failed: %v", err)
+		}
+	}()
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
+}
+
+func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
+	var spans []Span
+	if err := json.NewDecoder(r.Body).Decode(&spans); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+
+	spansByTrace := map[string][]Span{}
+	spansByID := map[string]Span{}
+	for _, span := range spans {
+		spansByTrace[span.TraceID] = append(spansByTrace[span.TraceID], span)
+		spansByID[span.SpanID] = span
+	}
+
+	batch := &nif.Batch{}
+	now := time.Now().UTC()
+	seenCalls := map[string]bool{}
+
+	for _, span := range spans {
+		if span.ParentSpanID == "" {
+			continue
+		}
+		parent, ok := spansByID[span.ParentSpanID]
+		if !ok {
+			continue
+		}
+
+		if parent.ServiceName != span.ServiceName && parent.ServiceName != "" && span.ServiceName != "" {
+			callKey := parent.ServiceName + "->" + span.ServiceName
+			if seenCalls[callKey] {
+				continue
+			}
+			seenCalls[callKey] = true
+
+			parentID := nif.DeterministicEntityID("runtime", "otel", nif.EntityService, parent.ServiceName, "runtime")
+			childID := nif.DeterministicEntityID("runtime", "otel", nif.EntityService, span.ServiceName, "runtime")
+
+			parentEnt := &nif.Entity{
+				ID:        parentID,
+				Type:      nif.EntityService,
+				Name:      parent.ServiceName,
+				RawName:   parent.ServiceName,
+				Namespace: "runtime",
+				Source: nif.SourceInfo{
+					SourceType: "runtime",
+					SourceID:   "otel",
+					ObservedAt: now,
+				},
+				Confidence:   1.0,
+				IngestionRun: "otel_runtime",
+			}
+			childEnt := &nif.Entity{
+				ID:        childID,
+				Type:      nif.EntityService,
+				Name:      span.ServiceName,
+				RawName:   span.ServiceName,
+				Namespace: "runtime",
+				Source: nif.SourceInfo{
+					SourceType: "runtime",
+					SourceID:   "otel",
+					ObservedAt: now,
+				},
+				Confidence:   1.0,
+				IngestionRun: "otel_runtime",
+			}
+
+			addEntityUnique(batch, parentEnt)
+			addEntityUnique(batch, childEnt)
+
+			rel := &nif.Relationship{
+				ID:           nif.DeterministicRelationshipID(nif.RelCalls, parentID, childID, "otel"),
+				Type:         nif.RelCalls,
+				FromEntityID: parentID,
+				ToEntityID:   childID,
+				Source: nif.SourceInfo{
+					SourceType: "runtime",
+					SourceID:   "otel",
+					ObservedAt: now,
+				},
+				Confidence:   1.0,
+				IngestionRun: "otel_runtime",
+			}
+			batch.Relationships = append(batch.Relationships, rel)
+		}
+	}
+
+	if batch.Len() > 0 {
+		_, err := s.Runner.Sink.Publish(r.Context(), batch)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"status": "success", "calls_ingested": len(seenCalls)})
+}
+
+func addEntityUnique(b *nif.Batch, e *nif.Entity) {
+	for _, existing := range b.Entities {
+		if existing.ID == e.ID {
+			return
+		}
+	}
+	b.Entities = append(b.Entities, e)
 }

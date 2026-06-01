@@ -67,22 +67,27 @@ CREATE INDEX IF NOT EXISTS idx_log_entity   ON delta_log(entity_id);
 CREATE INDEX IF NOT EXISTS idx_log_rel      ON delta_log(relationship_id);
 CREATE INDEX IF NOT EXISTS idx_log_occurred ON delta_log(occurred_at);
 
--- Search Index FTS5 table
-CREATE VIRTUAL TABLE IF NOT EXISTS entity_search USING fts5(
-    entity_id UNINDEXED,
-    canonical_name,
-    aliases,
-    entity_type,
-    sub_type,
-    namespace,
-    owner_team,
-    criticality,
-    maturity,
-    velocity,
-    is_active UNINDEXED,
-    architectural_smells,
-    tags
+-- Search Index table (Standard SQL fallback for compatibility)
+CREATE TABLE IF NOT EXISTS entity_search (
+    entity_id            TEXT PRIMARY KEY,
+    canonical_name       TEXT NOT NULL,
+    aliases              TEXT NOT NULL,
+    entity_type          TEXT NOT NULL,
+    sub_type             TEXT NOT NULL,
+    namespace            TEXT NOT NULL,
+    owner_team           TEXT NOT NULL,
+    criticality          TEXT NOT NULL,
+    maturity             TEXT NOT NULL,
+    velocity             TEXT NOT NULL,
+    is_active            INTEGER NOT NULL,
+    architectural_smells TEXT NOT NULL,
+    tags                 TEXT NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_search_ns   ON entity_search(namespace);
+CREATE INDEX IF NOT EXISTS idx_search_type ON entity_search(entity_type);
+CREATE INDEX IF NOT EXISTS idx_search_name ON entity_search(canonical_name);
+
 
 -- Snapshots table
 CREATE TABLE IF NOT EXISTS snapshots (

@@ -19,6 +19,7 @@ const (
 	EntityDatabaseTable  EntityType = "DATABASE_TABLE"
 	EntityTeam           EntityType = "TEAM"
 	EntityDatabaseSchema EntityType = "DATABASE_SCHEMA"
+	EntityClass          EntityType = "CLASS"
 )
 
 type RelationshipType string

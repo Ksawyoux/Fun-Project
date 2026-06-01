@@ -162,8 +162,9 @@ func (idx *Indexer) Search(ctx context.Context, opts SearchOptions) ([]*schema.E
 		args = append(args, activeVal)
 	}
 	if opts.Query != "" {
-		clauses = append(clauses, "entity_search MATCH ?")
-		args = append(args, opts.Query)
+		clauses = append(clauses, "(s.canonical_name LIKE ? OR s.aliases LIKE ? OR s.tags LIKE ?)")
+		likeArg := "%" + opts.Query + "%"
+		args = append(args, likeArg, likeArg, likeArg)
 	}
 
 	where := ""

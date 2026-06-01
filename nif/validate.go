@@ -92,6 +92,7 @@ var entitySet = map[EntityType]struct{}{
 	EntityDatabaseTable:  {},
 	EntityTeam:           {},
 	EntityDatabaseSchema: {},
+	EntityClass:          {},
 }
 
 func knownEntityType(t EntityType) bool {
