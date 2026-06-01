@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"archgraph/nif"
-	z4schema "archgraph/zone4/internal/schema"
+	z4schema "archgraph/zone4/schema"
 )
 
 func TestNIFToZone4SchemaContract(t *testing.T) {

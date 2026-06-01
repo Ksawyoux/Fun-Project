@@ -21,7 +21,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"archgraph/zone4/internal/schema"
+	"archgraph/zone4/schema"
 
 	_ "github.com/mattn/go-sqlite3"
 )

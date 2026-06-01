@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"archgraph/zone4/internal/schema"
+	"archgraph/zone4/schema"
 )
 
 // GetEntity returns the entity by canonical ID. Soft-deleted entities are

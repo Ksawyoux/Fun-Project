@@ -6,7 +6,7 @@ import (
 	"reflect"
 
 	"archgraph/zone4/internal/graphdb"
-	"archgraph/zone4/internal/schema"
+	"archgraph/zone4/schema"
 )
 
 // getEntityTx / getRelationshipTx do the same job as graphdb.GetEntity but

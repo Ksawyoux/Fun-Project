@@ -21,7 +21,7 @@ import (
 
 	"archgraph/zone4/internal/deltalog"
 	"archgraph/zone4/internal/graphdb"
-	"archgraph/zone4/internal/schema"
+	"archgraph/zone4/schema"
 )
 
 // API is the single-write entry point.
