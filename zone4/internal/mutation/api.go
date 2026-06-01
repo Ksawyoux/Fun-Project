@@ -21,16 +21,18 @@ import (
 
 	"archgraph/zone4/internal/deltalog"
 	"archgraph/zone4/internal/graphdb"
+	"archgraph/zone4/internal/search"
 	"archgraph/zone4/schema"
 )
 
 // API is the single-write entry point.
 type API struct {
-	store *graphdb.Store
+	store   *graphdb.Store
+	indexer *search.Indexer
 }
 
-func New(store *graphdb.Store) *API {
-	return &API{store: store}
+func New(store *graphdb.Store, indexer *search.Indexer) *API {
+	return &API{store: store, indexer: indexer}
 }
 
 // MutationKind controls how an entry in a batch is processed.
@@ -105,9 +107,11 @@ func (a *API) ApplyBatch(ctx context.Context, mutations []Mutation) (*BatchResul
 		}
 	}()
 
+	var relsToInvalidate [][2]string
+
 	for i, m := range mutations {
 		r := Result{Index: i, Kind: m.Kind}
-		if err := a.applyOne(ctx, tx, txnID, &m, &r); err != nil {
+		if err := a.applyOne(ctx, tx, txnID, &m, &r, &relsToInvalidate); err != nil {
 			r.Operation = OpFailed
 			r.Error = err.Error()
 			res.Results = append(res.Results, r)
@@ -121,19 +125,36 @@ func (a *API) ApplyBatch(ctx context.Context, mutations []Mutation) (*BatchResul
 		return res, fmt.Errorf("commit: %w", err)
 	}
 	rollback = false
+
+	// Post-commit hooks for cache invalidation & search indexing
+	for _, pair := range relsToInvalidate {
+		a.store.InvalidateRelCache(pair[0], pair[1])
+	}
+	for _, r := range res.Results {
+		if r.Operation == OpFailed || r.Operation == OpNoChange {
+			continue
+		}
+		if r.EntityID != "" {
+			a.store.InvalidateCache(r.EntityID)
+			if a.indexer != nil {
+				a.indexer.Enqueue(r.EntityID)
+			}
+		}
+	}
+
 	return res, nil
 }
 
-func (a *API) applyOne(ctx context.Context, tx *sql.Tx, txnID string, m *Mutation, r *Result) error {
+func (a *API) applyOne(ctx context.Context, tx *sql.Tx, txnID string, m *Mutation, r *Result, relsToInvalidate *[][2]string) error {
 	switch m.Kind {
 	case KindUpsertEntity:
 		return a.upsertEntity(ctx, tx, txnID, m, r)
 	case KindUpsertRelationship:
-		return a.upsertRelationship(ctx, tx, txnID, m, r)
+		return a.upsertRelationship(ctx, tx, txnID, m, r, relsToInvalidate)
 	case KindSoftDeleteEntity:
 		return a.softDeleteEntity(ctx, tx, txnID, m, r)
 	case KindDeleteRelationship:
-		return a.deleteRelationship(ctx, tx, txnID, m, r)
+		return a.deleteRelationship(ctx, tx, txnID, m, r, relsToInvalidate)
 	default:
 		return fmt.Errorf("unknown mutation kind %q", m.Kind)
 	}
@@ -193,7 +214,7 @@ func (a *API) upsertEntity(ctx context.Context, tx *sql.Tx, txnID string, m *Mut
 	return appendEntityLog(tx, txnID, deltalog.MutEntityUpdated, e.ID, existing, e, &r.LogEntryID)
 }
 
-func (a *API) upsertRelationship(ctx context.Context, tx *sql.Tx, txnID string, m *Mutation, r *Result) error {
+func (a *API) upsertRelationship(ctx context.Context, tx *sql.Tx, txnID string, m *Mutation, r *Result, relsToInvalidate *[][2]string) error {
 	rel := m.Relationship
 	if rel == nil {
 		return errors.New("upsert_relationship: missing relationship")
@@ -231,6 +252,7 @@ func (a *API) upsertRelationship(ctx context.Context, tx *sql.Tx, txnID string, 
 			return err
 		}
 		r.Operation = OpCreated
+		*relsToInvalidate = append(*relsToInvalidate, [2]string{rel.FromID, rel.ToID})
 		return appendRelLog(tx, txnID, deltalog.MutRelationshipCreated, rel.ID, nil, rel, &r.LogEntryID)
 	}
 
@@ -248,6 +270,7 @@ func (a *API) upsertRelationship(ctx context.Context, tx *sql.Tx, txnID string, 
 		return err
 	}
 	r.Operation = OpUpdated
+	*relsToInvalidate = append(*relsToInvalidate, [2]string{rel.FromID, rel.ToID})
 	return appendRelLog(tx, txnID, deltalog.MutRelationshipUpdated, rel.ID, existing, rel, &r.LogEntryID)
 }
 
@@ -277,7 +300,7 @@ func (a *API) softDeleteEntity(ctx context.Context, tx *sql.Tx, txnID string, m 
 	return appendEntityLog(tx, txnID, deltalog.MutEntitySoftDeleted, m.TargetID, existing, &after, &r.LogEntryID)
 }
 
-func (a *API) deleteRelationship(ctx context.Context, tx *sql.Tx, txnID string, m *Mutation, r *Result) error {
+func (a *API) deleteRelationship(ctx context.Context, tx *sql.Tx, txnID string, m *Mutation, r *Result, relsToInvalidate *[][2]string) error {
 	if m.TargetID == "" {
 		return errors.New("delete_relationship: missing target_id")
 	}
@@ -294,6 +317,7 @@ func (a *API) deleteRelationship(ctx context.Context, tx *sql.Tx, txnID string, 
 		return err
 	}
 	r.Operation = OpDeleted
+	*relsToInvalidate = append(*relsToInvalidate, [2]string{existing.FromID, existing.ToID})
 	after := *existing
 	after.IsActive = false
 	now := time.Now().UTC()

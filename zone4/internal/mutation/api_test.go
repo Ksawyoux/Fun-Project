@@ -19,7 +19,7 @@ func newTestAPI(t *testing.T) (*mutation.API, *graphdb.Store) {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { store.Close() })
-	return mutation.New(store), store
+	return mutation.New(store, nil), store
 }
 
 func ent(name, ns string) *schema.Entity {

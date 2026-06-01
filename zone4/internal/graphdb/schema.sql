@@ -66,3 +66,61 @@ CREATE INDEX IF NOT EXISTS idx_log_txn      ON delta_log(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_log_entity   ON delta_log(entity_id);
 CREATE INDEX IF NOT EXISTS idx_log_rel      ON delta_log(relationship_id);
 CREATE INDEX IF NOT EXISTS idx_log_occurred ON delta_log(occurred_at);
+
+-- Search Index FTS5 table
+CREATE VIRTUAL TABLE IF NOT EXISTS entity_search USING fts5(
+    entity_id UNINDEXED,
+    canonical_name,
+    aliases,
+    entity_type,
+    sub_type,
+    namespace,
+    owner_team,
+    criticality,
+    maturity,
+    velocity,
+    is_active UNINDEXED,
+    architectural_smells,
+    tags
+);
+
+-- Snapshots table
+CREATE TABLE IF NOT EXISTS snapshots (
+    snapshot_id        TEXT PRIMARY KEY,
+    snapshot_at        TEXT NOT NULL,
+    created_at         TEXT NOT NULL,
+    last_log_entry_id  INTEGER NOT NULL,
+    statistics         TEXT NOT NULL, -- JSON
+    graph_data         BLOB NOT NULL, -- Compressed Gzip JSON/GOB
+    checksum           TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_snapshots_at ON snapshots(snapshot_at);
+
+-- Runtime metrics store tables
+CREATE TABLE IF NOT EXISTS entity_metrics (
+    entity_id           TEXT NOT NULL,
+    timestamp           TEXT NOT NULL, -- RFC3339
+    request_rate        REAL NOT NULL DEFAULT 0.0,
+    error_rate          REAL NOT NULL DEFAULT 0.0,
+    p50_latency_ms      REAL NOT NULL DEFAULT 0.0,
+    p95_latency_ms      REAL NOT NULL DEFAULT 0.0,
+    p99_latency_ms      REAL NOT NULL DEFAULT 0.0,
+    cpu_utilization     REAL NOT NULL DEFAULT 0.0,
+    memory_utilization  REAL NOT NULL DEFAULT 0.0,
+    PRIMARY KEY (entity_id, timestamp)
+);
+
+CREATE TABLE IF NOT EXISTS relationship_metrics (
+    relationship_id     TEXT NOT NULL,
+    timestamp           TEXT NOT NULL, -- RFC3339
+    call_rate           REAL NOT NULL DEFAULT 0.0,
+    error_rate          REAL NOT NULL DEFAULT 0.0,
+    p99_latency_ms      REAL NOT NULL DEFAULT 0.0,
+    data_volume_bytes   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (relationship_id, timestamp)
+);
+
+CREATE INDEX IF NOT EXISTS idx_entity_metrics_ts ON entity_metrics(entity_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_rel_metrics_ts    ON relationship_metrics(relationship_id, timestamp DESC);
+

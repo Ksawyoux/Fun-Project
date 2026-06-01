@@ -14,8 +14,21 @@ import (
 // GetEntity returns the entity by canonical ID. Soft-deleted entities are
 // returned (with is_active=false) so historical lookups still work.
 func (s *Store) GetEntity(ctx context.Context, id string) (*schema.Entity, error) {
+	if s.cache != nil {
+		if e, ok := s.cache.GetEntity(id); ok {
+			return e, nil
+		}
+	}
 	row := s.db.QueryRowContext(ctx, entitySelectByID, id)
-	return scanEntity(row)
+	e, err := scanEntity(row)
+	if err != nil {
+		return nil, err
+	}
+	s.injectMetricsSummary(ctx, e)
+	if s.cache != nil {
+		s.cache.SetEntity(e.ID, e)
+	}
+	return e, nil
 }
 
 // GetEntityByName looks up the most recently updated active entity by
@@ -23,7 +36,42 @@ func (s *Store) GetEntity(ctx context.Context, id string) (*schema.Entity, error
 // matches.
 func (s *Store) GetEntityByName(ctx context.Context, namespace, name string) (*schema.Entity, error) {
 	row := s.db.QueryRowContext(ctx, entitySelectByName, namespace, name)
-	return scanEntity(row)
+	e, err := scanEntity(row)
+	if err != nil {
+		return nil, err
+	}
+	if s.cache != nil {
+		if cached, ok := s.cache.GetEntity(e.ID); ok {
+			return cached, nil
+		}
+	}
+	s.injectMetricsSummary(ctx, e)
+	if s.cache != nil {
+		s.cache.SetEntity(e.ID, e)
+	}
+	return e, nil
+}
+
+func (s *Store) injectMetricsSummary(ctx context.Context, e *schema.Entity) {
+	if s.metrics == nil {
+		return
+	}
+	em, err := s.metrics.GetLatestEntityMetrics(ctx, e.ID)
+	if err == nil && em != nil {
+		if e.Properties == nil {
+			e.Properties = make(map[string]any)
+		}
+		e.Properties["metrics_summary"] = map[string]any{
+			"request_rate":       em.RequestRate,
+			"error_rate":         em.ErrorRate,
+			"p50_latency_ms":     em.P50LatencyMs,
+			"p95_latency_ms":     em.P95LatencyMs,
+			"p99_latency_ms":     em.P99LatencyMs,
+			"cpu_utilization":    em.CPUUtilization,
+			"memory_utilization": em.MemoryUtilization,
+			"timestamp":          em.Timestamp.Format(time.RFC3339),
+		}
+	}
 }
 
 func (s *Store) GetRelationship(ctx context.Context, id string) (*schema.Relationship, error) {
@@ -115,6 +163,13 @@ func (s *Store) Neighborhood(ctx context.Context, originID string, maxDepth int,
 		maxDepth = 5
 	}
 
+	cacheKey := NeighborhoodKey(originID, maxDepth, dir)
+	if s.cache != nil {
+		if n, ok := s.cache.GetNeighborhood(cacheKey); ok {
+			return n, nil
+		}
+	}
+
 	origin, err := s.GetEntity(ctx, originID)
 	if err != nil {
 		return nil, err
@@ -165,6 +220,10 @@ func (s *Store) Neighborhood(ctx context.Context, originID string, maxDepth int,
 			continue
 		}
 		result.Nodes = append(result.Nodes, n)
+	}
+
+	if s.cache != nil {
+		s.cache.SetNeighborhood(cacheKey, result)
 	}
 	return result, nil
 }

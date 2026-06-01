@@ -14,7 +14,9 @@ import (
 
 	"archgraph/zone4/internal/graphdb"
 	"archgraph/zone4/internal/mutation"
+	"archgraph/zone4/internal/search"
 	"archgraph/zone4/internal/server"
+	"archgraph/zone4/internal/snapshot"
 )
 
 func main() {
@@ -24,23 +26,29 @@ func main() {
 	)
 	flag.Parse()
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	store, err := graphdb.Open(*dbPath)
 	if err != nil {
 		log.Fatalf("open store: %v", err)
 	}
 	defer store.Close()
 
-	api := mutation.New(store)
-	srv := server.New(store, api)
+	indexer := search.New(store.DB())
+	indexer.Start(ctx)
+	defer indexer.Stop()
+
+	snapshotStore := snapshot.New(store.DB())
+
+	api := mutation.New(store, indexer)
+	srv := server.New(store, api, indexer, snapshotStore)
 
 	httpSrv := &http.Server{
 		Addr:              *addr,
 		Handler:           srv.Routes(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	go func() {
 		log.Printf("zone4d listening on %s (db=%s)", *addr, *dbPath)

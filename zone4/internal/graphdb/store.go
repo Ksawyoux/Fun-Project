@@ -23,6 +23,8 @@ import (
 
 	"archgraph/zone4/schema"
 
+	"archgraph/zone4/internal/metrics"
+
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -33,7 +35,9 @@ var schemaDDL string
 // *sql.DB is goroutine-safe; individual transactions are not, but the mutation
 // package serializes those.
 type Store struct {
-	db *sql.DB
+	db      *sql.DB
+	cache   *GraphCache
+	metrics *metrics.Store
 }
 
 // Open opens (or creates) the SQLite database at the given path and applies
@@ -60,7 +64,11 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
-	return &Store{db: db}, nil
+	return &Store{
+		db:      db,
+		cache:   NewCache(),
+		metrics: metrics.New(db),
+	}, nil
 }
 
 // DB exposes the underlying *sql.DB so the mutation package can BEGIN a
@@ -68,6 +76,22 @@ func Open(path string) (*Store, error) {
 func (s *Store) DB() *sql.DB { return s.db }
 
 func (s *Store) Close() error { return s.db.Close() }
+
+func (s *Store) Cache() *GraphCache { return s.cache }
+
+func (s *Store) Metrics() *metrics.Store { return s.metrics }
+
+func (s *Store) InvalidateCache(entityID string) {
+	if s.cache != nil {
+		s.cache.InvalidateEntity(entityID)
+	}
+}
+
+func (s *Store) InvalidateRelCache(fromID, toID string) {
+	if s.cache != nil {
+		s.cache.InvalidateRelationship(fromID, toID)
+	}
+}
 
 // ErrNotFound is returned by GetEntity/GetEntityByName/GetRelationship when
 // the requested row doesn't exist.
