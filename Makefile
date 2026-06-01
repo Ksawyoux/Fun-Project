@@ -44,3 +44,4 @@ clean:
 	rm -f zone6/archgraph cmd/archgraph/archgraph
 	rm -rf zone2/zone2-state zone2-state
 	rm -f zone4.db zone4.db-* zone3.db zone3.db-*
+	rm -f zone4/zone4.db* zone3/zone3.db*

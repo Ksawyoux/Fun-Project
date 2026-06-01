@@ -17,27 +17,47 @@ NC='\033[0m' # No Color
 echo -e "${PURPLE}🏗️  ArchGraph Unified Runner${NC}"
 echo -e "${PURPLE}=================================${NC}"
 
-# Target repo path
-REPO_PATH="${1:-$(pwd)}"
-# Convert to absolute path
-REPO_PATH=$(cd "$REPO_PATH" && pwd)
-
 # Find absolute path of the script directory (project root)
 PROJECT_ROOT=$(cd "$(dirname "$0")" && pwd)
 
-# Resolve Namespace:
-# 1. User argument $2
-# 2. Extract from project's .archgraph.yaml
-# 3. Fallback to "local-dev"
-NAMESPACE="$2"
-if [ -z "$NAMESPACE" ] && [ -f "$PROJECT_ROOT/.archgraph.yaml" ]; then
-  NAMESPACE=$(grep -E '^namespace:' "$PROJECT_ROOT/.archgraph.yaml" | awk '{print $2}' | tr -d '"' | tr -d "'")
-fi
-if [ -z "$NAMESPACE" ]; then
-  NAMESPACE="local-dev"
+# Target repo path/URL
+TARGET_SOURCE="${1:-$(pwd)}"
+
+IS_REMOTE_URL=0
+if [[ "$TARGET_SOURCE" =~ ^(https?|git|ssh):// || "$TARGET_SOURCE" =~ ^git@ ]]; then
+  IS_REMOTE_URL=1
 fi
 
-echo -e "${BLUE}[1/5] Target Repository:${NC} $REPO_PATH"
+if [ "$IS_REMOTE_URL" -eq 1 ]; then
+  REPO_NAME=$(basename "$TARGET_SOURCE" .git)
+  NAMESPACE="$2"
+  if [ -z "$NAMESPACE" ]; then
+    NAMESPACE="$REPO_NAME"
+  fi
+  REPO_PATH="/tmp/archgraph_clones/$NAMESPACE"
+  
+  if [ ! -d "$REPO_PATH/.git" ]; then
+    echo -e "${YELLOW}📥 Cloning remote Git repository...${NC}"
+    mkdir -p "$(dirname "$REPO_PATH")"
+    git clone "$TARGET_SOURCE" "$REPO_PATH"
+  else
+    echo -e "${GREEN}🔄 Existing clone found at $REPO_PATH. Fetching updates...${NC}"
+    git -C "$REPO_PATH" fetch --all
+  fi
+  
+  echo -e "${BLUE}[1/5] Remote Git URL:${NC} $TARGET_SOURCE"
+else
+  REPO_PATH=$(cd "$TARGET_SOURCE" && pwd)
+  NAMESPACE="$2"
+  if [ -z "$NAMESPACE" ] && [ -f "$PROJECT_ROOT/.archgraph.yaml" ]; then
+    NAMESPACE=$(grep -E '^namespace:' "$PROJECT_ROOT/.archgraph.yaml" | awk '{print $2}' | tr -d '"' | tr -d "'")
+  fi
+  if [ -z "$NAMESPACE" ]; then
+    NAMESPACE="local-dev"
+  fi
+  echo -e "${BLUE}[1/5] Target Repository:${NC} $REPO_PATH"
+fi
+
 echo -e "${BLUE}[1/5] Namespace:${NC} $NAMESPACE"
 
 # Clear any conflicting ports from previous runs
@@ -122,7 +142,20 @@ done
 
 GIT_BLOCK=""
 if [ "$IS_GIT_REPO" -eq 1 ]; then
-  GIT_BLOCK=$(cat <<EOF
+  if [ "$IS_REMOTE_URL" -eq 1 ]; then
+    GIT_BLOCK=$(cat <<EOF
+  "git": [
+    {
+      "source_id": "auto-scan",
+      "repo_path": "$REPO_PATH",
+      "remote_url": "$TARGET_SOURCE",
+      "namespace": "$NAMESPACE"
+    }
+  ]
+EOF
+)
+  else
+    GIT_BLOCK=$(cat <<EOF
   "git": [
     {
       "source_id": "auto-scan",
@@ -132,6 +165,7 @@ if [ "$IS_GIT_REPO" -eq 1 ]; then
   ]
 EOF
 )
+  fi
 else
   echo -e "${YELLOW}    Target is not a Git repo; skipping Git ingestion and scanning supported source files only.${NC}"
 fi

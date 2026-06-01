@@ -52,6 +52,9 @@ func (p *Pipeline) Process(ctx context.Context, batch *nif.Batch) ([]z4client.Mu
 		}
 	}
 
+	// Deduplicate resolved entities
+	resolvedEntities = deduplicateEntities(resolvedEntities)
+
 	// 2. Stage 3: Relationship Inference & Deduplication
 	resolvedRelationships, err := p.stage3InferAndDeduplicate(ctx, batch.Relationships, resolvedEntities, idMap)
 	if err != nil {
@@ -89,4 +92,39 @@ func (p *Pipeline) Process(ctx context.Context, batch *nif.Batch) ([]z4client.Mu
 	}
 
 	return mutations, nil
+}
+
+func deduplicateEntities(entities []*nif.Entity) []*nif.Entity {
+	seen := make(map[string]*nif.Entity)
+	var ordered []*nif.Entity
+
+	for _, e := range entities {
+		if e.ID == "" {
+			continue
+		}
+		if existing, ok := seen[e.ID]; ok {
+			if e.Confidence > existing.Confidence {
+				existing.Confidence = e.Confidence
+				existing.Source = e.Source
+				existing.SubType = e.SubType
+				existing.Name = e.Name
+				existing.RawName = e.RawName
+			}
+			if existing.Properties == nil {
+				existing.Properties = make(map[string]any)
+			}
+			for k, v := range e.Properties {
+				existing.Properties[k] = v
+			}
+		} else {
+			cloned := *e
+			cloned.Properties = make(map[string]any)
+			for k, v := range e.Properties {
+				cloned.Properties[k] = v
+			}
+			seen[e.ID] = &cloned
+			ordered = append(ordered, &cloned)
+		}
+	}
+	return ordered
 }

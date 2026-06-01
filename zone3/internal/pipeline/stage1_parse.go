@@ -33,7 +33,7 @@ func normalizeName(name string) string {
 	for i, r := range name {
 		if i > 0 && r >= 'A' && r <= 'Z' {
 			prev := name[i-1]
-			if prev != '-' {
+			if (prev >= 'a' && prev <= 'z') || (prev >= '0' && prev <= '9') {
 				result.WriteRune('-')
 			}
 		}

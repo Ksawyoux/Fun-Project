@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -18,9 +19,10 @@ import (
 // to its own MODULE/SERVICE entity. If empty, the whole repo becomes one
 // entity. The spec calls this out as load-bearing for monorepos (§3.1).
 type GitConfig struct {
-	SourceID    string   `json:"source_id"`    // stable name for this configured source
-	RepoPath    string   `json:"repo_path"`    // local clone path
-	Namespace   string   `json:"namespace"`    // org/team scope
+	SourceID    string   `json:"source_id"`              // stable name for this configured source
+	RepoPath    string   `json:"repo_path"`              // local clone path
+	RemoteURL   string   `json:"remote_url,omitempty"`   // remote repository URL
+	Namespace   string   `json:"namespace"`              // org/team scope
 	SubProjects []string `json:"sub_projects,omitempty"` // sub-paths relative to RepoPath
 }
 
@@ -47,8 +49,11 @@ func (g *Git) ValidateConfig() error {
 	if g.cfg.SourceID == "" {
 		return fmt.Errorf("git: source_id required")
 	}
+	if g.cfg.RepoPath == "" && g.cfg.RemoteURL == "" {
+		return fmt.Errorf("git: repo_path or remote_url required")
+	}
 	if g.cfg.RepoPath == "" {
-		return fmt.Errorf("git: repo_path required")
+		g.cfg.RepoPath = filepath.Join("/tmp", "archgraph_clones", g.cfg.SourceID)
 	}
 	if g.cfg.Namespace == "" {
 		return fmt.Errorf("git: namespace required")
@@ -57,10 +62,25 @@ func (g *Git) ValidateConfig() error {
 }
 
 func (g *Git) CheckConnectivity(ctx context.Context) error {
-	// "Connectivity" for a local repo is "is this a git repo".
-	_, err := g.runGit(ctx, "rev-parse", "--git-dir")
-	if err != nil {
-		return fmt.Errorf("git: %s is not a git repository: %w", g.cfg.RepoPath, err)
+	// Check if directory exists and is a valid git repository
+	_, parseErr := g.runGit(ctx, "rev-parse", "--git-dir")
+	if parseErr != nil {
+		// If not a git repo, check if we can clone it
+		if g.cfg.RemoteURL != "" {
+			parentDir := filepath.Dir(g.cfg.RepoPath)
+			_ = os.MkdirAll(parentDir, 0755)
+			cmd := exec.CommandContext(ctx, "git", "clone", g.cfg.RemoteURL, g.cfg.RepoPath)
+			var stderr bytes.Buffer
+			cmd.Stderr = &stderr
+			if err := cmd.Run(); err != nil {
+				return fmt.Errorf("git: failed to clone remote %s to %s: %w (stderr: %s)", g.cfg.RemoteURL, g.cfg.RepoPath, err, strings.TrimSpace(stderr.String()))
+			}
+		} else {
+			return fmt.Errorf("git: %s is not a git repository: %w", g.cfg.RepoPath, parseErr)
+		}
+	} else if g.cfg.RemoteURL != "" {
+		// Existing repo: fetch to verify connectivity and get remote refs
+		_, _ = g.runGit(ctx, "fetch", "--all")
 	}
 	return nil
 }
