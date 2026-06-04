@@ -2370,12 +2370,12 @@ func handleWiki(ctx context.Context, storageAddr, servingAddr, namespace string,
 	mux.Handle("/", http.FileServer(http.FS(subFS)))
 
 	serverAddr := ":" + port
-	fmt.Printf("📖 Starting Code Wiki on http://localhost:%s/wiki.html ...\n", port)
+	fmt.Printf("📖 Starting Code Wiki on http://localhost:%s/#wiki ...\n", port)
 	fmt.Printf("Pulling generated wiki from Serving at %s\n", servingAddr)
 
 	go func() {
 		time.Sleep(500 * time.Millisecond)
-		openBrowser("http://localhost:" + port + "/wiki.html")
+		openBrowser("http://localhost:" + port + "/#wiki")
 	}()
 
 	if err := http.ListenAndServe(serverAddr, mux); err != nil {

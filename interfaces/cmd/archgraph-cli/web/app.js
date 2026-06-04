@@ -98,6 +98,13 @@ async function init() {
                 ticked();
             })
     );
+
+    // Hash-based view switching
+    if (window.location.hash === "#wiki") {
+        switchView("wiki");
+    } else {
+        switchView("graph");
+    }
 }
 
 // Fetch main graph data and health smells
@@ -447,6 +454,27 @@ function setupEventHandlers() {
 
     // Ingestion Button
     document.getElementById("btn-ingest-repo").addEventListener("click", runRepositoryIngestion);
+
+    // Wiki Handlers
+    document.getElementById("btn-wiki-send-question").addEventListener("click", () => askWikiAssistant());
+    document.getElementById("wiki-chat-input").addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            askWikiAssistant();
+        }
+    });
+
+    document.getElementById("wiki-ns-input").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+            const val = e.target.value.trim();
+            if (val) {
+                config.namespace = val;
+                document.getElementById("stat-namespace").textContent = config.namespace;
+                refreshGraphData();
+                loadWiki();
+            }
+        }
+    });
 
     // Canvas click & drag delegation
     d3.select(canvas)
@@ -1047,6 +1075,253 @@ async function runRepositoryIngestion() {
         statusDiv.className = "ingest-status error";
         statusDiv.textContent = `❌ Connection error: ${err.message}`;
     }
+}
+
+// Wiki UI state
+let wikiData = null;
+
+// Unified view switcher
+function switchView(view) {
+    window.location.hash = view;
+    document.getElementById("tab-graph").classList.toggle("active", view === "graph");
+    document.getElementById("tab-wiki").classList.toggle("active", view === "wiki");
+    
+    document.getElementById("view-graph").classList.toggle("hidden", view !== "graph");
+    document.getElementById("view-wiki").classList.toggle("hidden", view !== "wiki");
+    
+    if (view === "wiki") {
+        loadWiki();
+    }
+}
+
+// Load and render dynamic wiki
+async function loadWiki() {
+    const nsInput = document.getElementById("wiki-ns-input");
+    if (nsInput) nsInput.value = config.namespace;
+    
+    const url = `${config.serving}/v1/wiki?namespace=${encodeURIComponent(config.namespace)}`;
+    const content = document.getElementById("wiki-content");
+    content.innerHTML = '<div class="placeholder spinner">Generating wiki…</div>';
+    
+    try {
+        const res = await fetch(url);
+        if (!res.ok) {
+            const body = await res.text();
+            showWikiError(`Wiki generation failed (${res.status}). ${body}`);
+            return;
+        }
+        wikiData = await res.json();
+        renderWikiTOC();
+        if (wikiData.topics && wikiData.topics.length) {
+            selectWikiTopic(wikiData.topics[0].id);
+        } else {
+            showWikiError("The wiki is empty — has this namespace been ingested yet?");
+        }
+    } catch (e) {
+        showWikiError("Could not reach the serving layer at " + config.serving + ". Is the stack running?");
+    }
+}
+
+function renderWikiTOC() {
+    const tocList = document.getElementById("wiki-toc-list");
+    tocList.innerHTML = "";
+    (wikiData.topics || []).forEach(t => {
+        const div = document.createElement("div");
+        div.className = "toc-item";
+        div.id = "wiki-toc-" + t.id;
+        div.onclick = () => selectWikiTopic(t.id);
+        div.innerHTML = `<div class="toc-title">${escapeHtml(t.title)}</div>` +
+            (t.summary ? `<div class="toc-summary">${escapeHtml(t.summary)}</div>` : "");
+        tocList.appendChild(div);
+    });
+}
+
+function selectWikiTopic(id) {
+    document.querySelectorAll(".wiki-toc-list .toc-item").forEach(el => el.classList.remove("active"));
+    const tocEl = document.getElementById("wiki-toc-" + id);
+    if (tocEl) tocEl.classList.add("active");
+    
+    const page = wikiData.pages && wikiData.pages[id];
+    const content = document.getElementById("wiki-content");
+    if (!page) {
+        content.innerHTML = `<div class="placeholder">No page generated for this topic.</div>`;
+        return;
+    }
+    
+    const cached = page.cached ? `<span class="badge">cached</span>` : "";
+    const llm = page.used_llm ? `<span class="badge">${escapeHtml(page.used_llm)}</span>` : "";
+    const nCites = (page.citations || []).length;
+    
+    content.innerHTML = 
+        `<h1>${escapeHtml(page.title)}</h1>` +
+        (page.summary ? `<p class="page-summary">${escapeHtml(page.summary)}</p>` : "") +
+        `<div class="page-meta">${llm}${cached}<span class="badge">${nCites} code links</span></div>` +
+        `<div id="wiki-page-body"></div>`;
+        
+    const body = document.getElementById("wiki-page-body");
+    body.innerHTML = window.marked ? marked.parse(page.markdown || "") : escapeHtml(page.markdown || "");
+    
+    renderWikiMermaid(body);
+    wireWikiCodeLinks(body);
+    content.scrollTop = 0;
+}
+
+function renderWikiMermaid(root) {
+    if (!window.mermaid) return;
+    root.querySelectorAll("code.language-mermaid").forEach((code, i) => {
+        const div = document.createElement("div");
+        div.className = "mermaid";
+        div.textContent = code.textContent;
+        const pre = code.closest("pre");
+        (pre || code).replaceWith(div);
+    });
+    try {
+        mermaid.run({ nodes: root.querySelectorAll(".mermaid") });
+    } catch (e) {
+        // diagram syntax issues shouldn't break the page
+    }
+}
+
+function wireWikiCodeLinks(root) {
+    root.querySelectorAll("a").forEach(a => {
+        const href = a.getAttribute("href") || "";
+        if (/^https?:\/\//.test(href) || href.startsWith("#") || href.startsWith("mailto:")) return;
+        const m = href.match(/^([^#?]+?)(?:#L(\d+))?$/);
+        if (!m) return;
+        const path = m[1];
+        const line = m[2] ? parseInt(m[2], 10) : 0;
+        if (!/\.[a-zA-Z0-9]+$/.test(path)) return; // looks like a file
+        a.classList.add("codelink");
+        a.href = "javascript:void(0)";
+        a.onclick = (ev) => {
+            ev.preventDefault();
+            openSrc(path, line);
+        };
+    });
+}
+
+// Wiki Q&A Assistant Chat
+async function askWikiAssistant(qText) {
+    const chatInput = document.getElementById("wiki-chat-input");
+    if (qText) {
+        chatInput.value = qText;
+    }
+    const question = chatInput.value.trim();
+    if (!question) return;
+    
+    const chatHistory = document.getElementById("wiki-chat-history");
+    
+    // User message
+    const userMsg = document.createElement("div");
+    userMsg.className = "chat-message user";
+    userMsg.textContent = question;
+    chatHistory.appendChild(userMsg);
+    chatInput.value = "";
+    chatHistory.scrollTop = chatHistory.scrollHeight;
+    
+    // Agent loader message
+    const agentMsg = document.createElement("div");
+    agentMsg.className = "chat-message agent";
+    agentMsg.textContent = "🤖 Reasoning over codebase...";
+    chatHistory.appendChild(agentMsg);
+    chatHistory.scrollTop = chatHistory.scrollHeight;
+    
+    try {
+        const resp = await fetch(`${config.serving}/v1/ask`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                question: question,
+                namespace: config.namespace
+            })
+        });
+        
+        if (resp.ok) {
+            const data = await resp.json();
+            let answerHTML = "";
+            if (data.answer) {
+                let text = data.answer.text;
+                text = text.replace(/`([^`]+)`/g, "<code>$1</code>");
+                text = text.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+                text = text.replace(/\n/g, "<br>");
+                answerHTML = `<p>${text}</p>`;
+                if (data.answer.mermaid_diagram) {
+                    answerHTML += `
+                        <div style="margin-top:12px;">
+                            <strong>Visual Flow:</strong>
+                            <pre><code>${data.answer.mermaid_diagram}</code></pre>
+                        </div>
+                    `;
+                }
+            } else if (data.blast_radius) {
+                answerHTML = `<p><strong>Blast Radius Analysis:</strong> Affected ${data.blast_radius.total_affected} downstreams.</p>`;
+            } else if (data.health_report) {
+                answerHTML = `<p><strong>Health Audit Analysis:</strong> Found ${data.health_report.summary.cycles_found} loops and ${data.health_report.smells.length} smells.</p>`;
+            } else {
+                answerHTML = `<p>Question processed. No narrative answer returned.</p>`;
+            }
+            agentMsg.innerHTML = `🤖 <strong>ArchGraph:</strong> ${answerHTML}`;
+        } else {
+            agentMsg.textContent = "❌ Failed to query serving layer.";
+        }
+    } catch (e) {
+        agentMsg.textContent = `❌ Connection error: ${e.message}`;
+    }
+    chatHistory.scrollTop = chatHistory.scrollHeight;
+}
+
+// Unified source viewer modal handlers
+async function openSrc(path, line) {
+    const title = document.getElementById("src-title");
+    const bodyEl = document.getElementById("src-body");
+    title.textContent = path + (line ? ":" + line : "");
+    bodyEl.innerHTML = '<div class="spinner">loading…</div>';
+    document.getElementById("src-modal").classList.add("open");
+    
+    const url = `/api/source?path=${encodeURIComponent(path)}&namespace=${encodeURIComponent(config.namespace)}`;
+    try {
+        const res = await fetch(url);
+        const text = await res.text();
+        if (!res.ok) {
+            bodyEl.innerHTML = `<div class="placeholder">${escapeHtml(text || "file not found")}</div>`;
+            return;
+        }
+        renderSource(bodyEl, text, line);
+    } catch (e) {
+        bodyEl.innerHTML = `<div class="placeholder">Could not load source.</div>`;
+    }
+}
+
+function renderSource(el, text, line) {
+    const lines = text.split("\n");
+    const pad = String(lines.length).length;
+    const html = lines
+        .map((ln, i) => {
+            const n = i + 1;
+            const cls = n === line ? "hl" : "";
+            const num = String(n).padStart(pad, " ");
+            return `<span class="${cls}">${num}  ${escapeHtml(ln)}</span>`;
+        })
+        .join("\n");
+    el.innerHTML = `<pre>${html}</pre>`;
+    if (line) {
+        const hl = el.querySelector(".hl");
+        if (hl) hl.scrollIntoView({ block: "center" });
+    }
+}
+
+function closeSrc() {
+    document.getElementById("src-modal").classList.remove("open");
+}
+
+function showWikiError(msg) {
+    document.getElementById("wiki-content").innerHTML = `<div class="placeholder">${escapeHtml(msg)}</div>`;
+}
+
+function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
+    );
 }
 
 // Bootstrap
