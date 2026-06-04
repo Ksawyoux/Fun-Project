@@ -16,12 +16,14 @@ import (
 	"archgraph/serving/internal/reasoner"
 	"archgraph/serving/internal/server"
 	"archgraph/serving/internal/storageclient"
+	"archgraph/serving/internal/wiki"
 )
 
 func main() {
 	var (
 		storageURL = flag.String("storage", "http://localhost:8080", "Storage base URL")
 		addr       = flag.String("addr", ":8081", "HTTP listen address")
+		wikiCache  = flag.String("wiki-cache", "wiki-cache", "Directory for cached generated wiki pages")
 	)
 	flag.Parse()
 
@@ -36,6 +38,9 @@ func main() {
 	)
 	if os.Getenv("ARCHGRAPH_ENABLE_CLAUDE_CLI") == "1" && os.Getenv("ARCHGRAPH_FORCE_STUB") == "" {
 		if cli, err := reasoner.NewClaudeCLI(os.Getenv("CLAUDE_BIN")); err == nil {
+			// Wiki pages have larger prompts than interactive Q&A; give the CLI
+			// a longer budget so big subsystems don't time out.
+			cli.SetTimeout(180 * time.Second)
 			llm = cli
 			llmName = "claude-cli"
 		} else {
@@ -44,7 +49,12 @@ func main() {
 	}
 	reason := reasoner.New(llm, llmName)
 
-	srv := server.New(cl, reason)
+	// The wiki generator reuses the same LLM adapter as the reasoner. With the
+	// stub LLM it still produces a structured (if terse) wiki; with the claude
+	// CLI it produces narrative, code-linked pages like Code Wiki.
+	wikiGen := wiki.NewGenerator(cl, llm, llmName, *wikiCache)
+
+	srv := server.New(cl, reason, wikiGen)
 	httpSrv := &http.Server{
 		Addr:              *addr,
 		Handler:           srv.Routes(),

@@ -208,6 +208,8 @@ func main() {
 		handleMCP(ctx, *storageAddr, *servingAddr, cfg.Namespace)
 	case "dashboard":
 		handleDashboard(ctx, *storageAddr, *servingAddr, cfg.Namespace, subArgs)
+	case "wiki":
+		handleWiki(ctx, *storageAddr, *servingAddr, cfg.Namespace, subArgs)
 	case "analyze-pr":
 		handleAnalyzePR(ctx, *storageAddr, *servingAddr, cfg, subArgs)
 	default:
@@ -233,6 +235,7 @@ func printUsage() {
 	fmt.Println("  document [--out <file>]             Generate markdown documentation for the codebase")
 	fmt.Println("  mcp                                 Run as a Model Context Protocol (MCP) server over stdio")
 	fmt.Println("  dashboard [--port <port>]           Launch the interactive Web Dashboard")
+	fmt.Println("  wiki [--port <port>]                Launch the Code-Wiki reader (auto-generated narrative docs)")
 	fmt.Println("  analyze-pr [--base-ref <ref>] [--head-ref <ref>] Evaluate pull request changes")
 }
 
@@ -2337,6 +2340,87 @@ func openBrowser(url string) {
 	}
 	// Fallback to cmd on Windows
 	_ = exec.Command("cmd", "/c", "start", url).Start()
+}
+
+// handleWiki launches the Code-Wiki reader: a static web view that pulls the
+// LLM-generated wiki from the serving layer (/v1/wiki) and resolves its deep
+// code links against the local source tree via /api/source.
+func handleWiki(ctx context.Context, storageAddr, servingAddr, namespace string, args []string) {
+	port := "8085"
+	fsCmd := flag.NewFlagSet("wiki", flag.ExitOnError)
+	fsCmd.StringVar(&port, "port", "8085", "Wiki web server port")
+	_ = fsCmd.Parse(args)
+
+	subFS, err := fs.Sub(webFS, "web")
+	if err != nil {
+		fmt.Printf("Error creating web filesystem sub-fs: %v\n", err)
+		os.Exit(1)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/config", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"storage":   storageAddr,
+			"serving":   servingAddr,
+			"namespace": namespace,
+		})
+	})
+	mux.HandleFunc("/api/source", serveSource)
+	mux.Handle("/", http.FileServer(http.FS(subFS)))
+
+	serverAddr := ":" + port
+	fmt.Printf("📖 Starting Code Wiki on http://localhost:%s/wiki.html ...\n", port)
+	fmt.Printf("Pulling generated wiki from Serving at %s\n", servingAddr)
+
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		openBrowser("http://localhost:" + port + "/wiki.html")
+	}()
+
+	if err := http.ListenAndServe(serverAddr, mux); err != nil {
+		fmt.Printf("Wiki server failed: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// serveSource returns the contents of a source file referenced by a wiki code
+// link. The path is resolved against the repo root (or the namespace's cloned
+// copy) and sandboxed to prevent traversal outside it.
+func serveSource(w http.ResponseWriter, r *http.Request) {
+	rel := r.URL.Query().Get("path")
+	if rel == "" {
+		http.Error(w, "path is required", http.StatusBadRequest)
+		return
+	}
+	root := wikiRepoRoot(r.URL.Query().Get("namespace"))
+
+	// Sandbox: clean the requested path and ensure it stays within root.
+	clean := filepath.Clean("/" + filepath.FromSlash(rel))
+	full := filepath.Join(root, clean)
+	if relCheck, err := filepath.Rel(root, full); err != nil || strings.HasPrefix(relCheck, "..") {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+	data, err := os.ReadFile(full)
+	if err != nil {
+		http.Error(w, "file not found: "+rel, http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = w.Write(data)
+}
+
+// wikiRepoRoot mirrors the dashboard's repo resolution: local workspace root by
+// default, or the namespace's cloned tree under /tmp/archgraph_clones/<ns>.
+func wikiRepoRoot(ns string) string {
+	if ns != "" && ns != "local" && ns != "local-dev" && ns != "default" {
+		tmpPath := filepath.Join("/tmp", "archgraph_clones", ns)
+		if _, err := os.Stat(tmpPath); err == nil {
+			return tmpPath
+		}
+	}
+	return findWorkspaceRoot()
 }
 
 func handleAnalyzePR(ctx context.Context, storageAddr, servingAddr string, cfg *Config, args []string) {

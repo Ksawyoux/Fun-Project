@@ -35,6 +35,14 @@ func NewClaudeCLI(bin string) (*ClaudeCLI, error) {
 	return &ClaudeCLI{bin: resolved, timeout: defaultClaudeCLITimeout}, nil
 }
 
+// SetTimeout overrides the per-call timeout. Wiki generation uses a longer
+// budget than interactive Q&A because subsystem pages have larger prompts.
+func (c *ClaudeCLI) SetTimeout(d time.Duration) {
+	if d > 0 {
+		c.timeout = d
+	}
+}
+
 func (c *ClaudeCLI) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 	timeout := c.timeout
 	if timeout <= 0 {

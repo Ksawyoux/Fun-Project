@@ -18,15 +18,19 @@ import (
 	"archgraph/serving/internal/reasoner"
 	"archgraph/serving/internal/retriever"
 	"archgraph/serving/internal/storageclient"
+	"archgraph/serving/internal/wiki"
 )
 
 type Server struct {
 	cl     *storageclient.Client
 	reason *reasoner.Reasoner
+	wiki   *wiki.Generator
 }
 
-func New(cl *storageclient.Client, reason *reasoner.Reasoner) *Server {
-	return &Server{cl: cl, reason: reason}
+// New builds the serving HTTP surface. wikiGen may be nil — the /v1/wiki
+// endpoints then report 503 rather than serving an un-generatable wiki.
+func New(cl *storageclient.Client, reason *reasoner.Reasoner, wikiGen *wiki.Generator) *Server {
+	return &Server{cl: cl, reason: reason, wiki: wikiGen}
 }
 
 func (s *Server) Routes() http.Handler {
@@ -38,6 +42,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /v1/entities/{id}", s.handleGetEntity)
 	mux.HandleFunc("GET /v1/entities", s.handleListEntities)
 	mux.HandleFunc("GET /v1/log", s.handleReadLog)
+	mux.HandleFunc("GET /v1/wiki", s.handleWiki)
+	mux.HandleFunc("POST /v1/wiki/generate", s.handleWiki)
+	mux.HandleFunc("GET /v1/wiki/page/{id}", s.handleWikiPage)
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
@@ -325,4 +332,49 @@ func (s *Server) handleReadLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"entries": entries})
+}
+
+// --- /v1/wiki --- Code-Wiki-style generated documentation.
+//
+// GET /v1/wiki?namespace=X and POST /v1/wiki/generate?namespace=X both build
+// (or load from cache) the full wiki. Generation is cache-backed: the first
+// build pays the LLM cost, later calls return unchanged topics instantly.
+
+func (s *Server) handleWiki(w http.ResponseWriter, r *http.Request) {
+	wk, ok := s.buildWiki(w, r)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, wk)
+}
+
+func (s *Server) handleWikiPage(w http.ResponseWriter, r *http.Request) {
+	wk, ok := s.buildWiki(w, r)
+	if !ok {
+		return
+	}
+	page, found := wk.Pages[r.PathValue("id")]
+	if !found {
+		writeError(w, http.StatusNotFound, "page_not_found", "no wiki page for topic "+r.PathValue("id"))
+		return
+	}
+	writeJSON(w, http.StatusOK, page)
+}
+
+func (s *Server) buildWiki(w http.ResponseWriter, r *http.Request) (*wiki.Wiki, bool) {
+	if s.wiki == nil {
+		writeError(w, http.StatusServiceUnavailable, "wiki_disabled", "wiki generator not configured")
+		return nil, false
+	}
+	ns := r.URL.Query().Get("namespace")
+	if ns == "" {
+		writeError(w, http.StatusBadRequest, "missing_namespace", "namespace query parameter required")
+		return nil, false
+	}
+	wk, err := s.wiki.Generate(r.Context(), ns)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "wiki_generation_failed", err.Error())
+		return nil, false
+	}
+	return wk, true
 }
