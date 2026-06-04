@@ -21,7 +21,7 @@ import (
 
 func main() {
 	var (
-		dbPath = flag.String("db", "zone4.db", "SQLite database path (use :memory: for ephemeral)")
+		dbPath = flag.String("db", "storage.db", "SQLite database path (use :memory: for ephemeral)")
 		addr   = flag.String("addr", ":8080", "HTTP listen address")
 	)
 	flag.Parse()
@@ -51,7 +51,7 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("zone4d listening on %s (db=%s)", *addr, *dbPath)
+		log.Printf("storaged listening on %s (db=%s)", *addr, *dbPath)
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("http server: %v", err)
 		}

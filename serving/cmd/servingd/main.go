@@ -20,12 +20,12 @@ import (
 
 func main() {
 	var (
-		zone4URL = flag.String("zone4", "http://localhost:8080", "Zone 4 base URL")
-		addr     = flag.String("addr", ":8081", "HTTP listen address")
+		storageURL = flag.String("storage", "http://localhost:8080", "Storage base URL")
+		addr       = flag.String("addr", ":8081", "HTTP listen address")
 	)
 	flag.Parse()
 
-	cl := storageclient.New(*zone4URL)
+	cl := storageclient.New(*storageURL)
 
 	// LLM adapter: deterministic stub by default. Operators can opt into the
 	// local `claude` CLI with ARCHGRAPH_ENABLE_CLAUDE_CLI=1 when the host has an
@@ -55,7 +55,7 @@ func main() {
 	defer stop()
 
 	go func() {
-		log.Printf("zone5d listening on %s (zone4=%s)", *addr, *zone4URL)
+		log.Printf("servingd listening on %s (storage=%s)", *addr, *storageURL)
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("http server: %v", err)
 		}

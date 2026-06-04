@@ -45,11 +45,11 @@ type Config struct {
 func main() {
 	var (
 		addr        = flag.String("addr", ":8083", "HTTP listen address")
-		stateDir    = flag.String("state", "./zone2-state", "Directory for checkpoints, ledger, DLQ")
-		zone3URL    = flag.String("zone3", "http://localhost:8082", "Zone 3 base URL (default ingestion pipeline)")
-		zone4URL    = flag.String("zone4", "", "Zone 4 base URL (direct mutations sink, debug/dev only)")
+		stateDir    = flag.String("state", "./ingestion-state", "Directory for checkpoints, ledger, DLQ")
+		pipelineURL = flag.String("pipeline", "http://localhost:8082", "Pipeline base URL (default ingestion pipeline)")
+		storageURL  = flag.String("storage", "", "Storage base URL (direct mutations sink, debug/dev only)")
 		fileSinkDir = flag.String("file-sink", "", "If set, write to JSONL under this dir instead of HTTP sink")
-		configPath  = flag.String("config", "", "Path to zone2 config JSON; if empty, scans CWD as one source")
+		configPath  = flag.String("config", "", "Path to ingestion config JSON; if empty, scans CWD as one source")
 	)
 	flag.Parse()
 
@@ -82,13 +82,13 @@ func main() {
 			log.Fatalf("file sink: %v", err)
 		}
 		sink = fs
-		log.Printf("[zone2] sink: file → %s", *fileSinkDir)
-	} else if *zone4URL != "" {
-		sink = delivery.NewZone4Sink(*zone4URL)
-		log.Printf("[zone2] sink: zone4 (debug/dev direct) → %s", *zone4URL)
+		log.Printf("[ingestion] sink: file → %s", *fileSinkDir)
+	} else if *storageURL != "" {
+		sink = delivery.NewZone4Sink(*storageURL)
+		log.Printf("[ingestion] sink: storage (debug/dev direct) → %s", *storageURL)
 	} else {
-		sink = delivery.NewZone3Sink(*zone3URL)
-		log.Printf("[zone2] sink: zone3 → %s", *zone3URL)
+		sink = delivery.NewZone3Sink(*pipelineURL)
+		log.Printf("[ingestion] sink: pipeline → %s", *pipelineURL)
 	}
 
 	cfg, err := loadConfig(*configPath)
@@ -101,31 +101,31 @@ func main() {
 		if err := reg.Register(ingestor.NewGit(g)); err != nil {
 			log.Fatalf("register git %s: %v", g.SourceID, err)
 		}
-		log.Printf("[zone2] registered git:%s (%s)", g.SourceID, g.RepoPath)
+		log.Printf("[ingestion] registered git:%s (%s)", g.SourceID, g.RepoPath)
 	}
 	for _, a := range cfg.GoAST {
 		if err := reg.Register(ingestor.NewGoAST(a)); err != nil {
 			log.Fatalf("register ast-go %s: %v", a.SourceID, err)
 		}
-		log.Printf("[zone2] registered ast-go:%s (%s)", a.SourceID, a.RootPath)
+		log.Printf("[ingestion] registered ast-go:%s (%s)", a.SourceID, a.RootPath)
 	}
 	for _, p := range cfg.PythonAST {
 		if err := reg.Register(ingestor.NewPythonAST(p)); err != nil {
 			log.Fatalf("register ast-python %s: %v", p.SourceID, err)
 		}
-		log.Printf("[zone2] registered ast-python:%s (%s)", p.SourceID, p.RootPath)
+		log.Printf("[ingestion] registered ast-python:%s (%s)", p.SourceID, p.RootPath)
 	}
 	for _, t := range cfg.TypeScript {
 		if err := reg.Register(ingestor.NewTypeScriptAST(t)); err != nil {
 			log.Fatalf("register ast-ts %s: %v", t.SourceID, err)
 		}
-		log.Printf("[zone2] registered ast-ts:%s (%s)", t.SourceID, t.RootPath)
+		log.Printf("[ingestion] registered ast-ts:%s (%s)", t.SourceID, t.RootPath)
 	}
 	for _, o := range cfg.OpenAPI {
 		if err := reg.Register(ingestor.NewOpenAPI(o)); err != nil {
 			log.Fatalf("register openapi %s: %v", o.SourceID, err)
 		}
-		log.Printf("[zone2] registered openapi:%s (%s)", o.SourceID, o.RootPath)
+		log.Printf("[ingestion] registered openapi:%s (%s)", o.SourceID, o.RootPath)
 	}
 
 	runner := &orchestrator.Runner{
@@ -148,14 +148,14 @@ func main() {
 	defer stop()
 
 	go func() {
-		log.Printf("[zone2] listening on %s", *addr)
+		log.Printf("[ingestion] listening on %s", *addr)
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("http: %v", err)
 		}
 	}()
 
 	<-ctx.Done()
-	log.Printf("[zone2] shutdown")
+	log.Printf("[ingestion] shutdown")
 	shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = httpServer.Shutdown(shutCtx)
@@ -164,7 +164,7 @@ func main() {
 // loadConfig reads the JSON file at path, or — if path is empty — returns a
 // single-source default that scans the current working directory.
 //
-// The default convenience config is what makes "go run ./cmd/zone2d" work
+// The default convenience config is what makes "go run ./cmd/ingestiond" work
 // without ceremony. For real use the operator passes -config pointing at a
 // JSON file with explicit sources.
 func loadConfig(path string) (Config, error) {
@@ -173,7 +173,7 @@ func loadConfig(path string) (Config, error) {
 		if err != nil {
 			return Config{}, err
 		}
-		log.Printf("[zone2] no -config; scanning %s as one default source", cwd)
+		log.Printf("[ingestion] no -config; scanning %s as one default source", cwd)
 		return Config{
 			Git: []ingestor.GitConfig{{
 				SourceID: "default", RepoPath: cwd, Namespace: "local",

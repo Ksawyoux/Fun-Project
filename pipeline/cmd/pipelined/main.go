@@ -20,9 +20,9 @@ import (
 
 func main() {
 	var (
-		dbPath   = flag.String("db", "zone3.db", "SQLite path for local Entity Registry")
-		zone4URL = flag.String("zone4", "http://localhost:8080", "Zone 4 base URL")
-		addr     = flag.String("addr", ":8082", "HTTP listen address")
+		dbPath     = flag.String("db", "pipeline.db", "SQLite path for local Entity Registry")
+		storageURL = flag.String("storage", "http://localhost:8080", "Storage base URL")
+		addr       = flag.String("addr", ":8082", "HTTP listen address")
 	)
 	flag.Parse()
 
@@ -33,8 +33,8 @@ func main() {
 	}
 	defer reg.Close()
 
-	// 2. Initialize Zone 4 HTTP Client
-	z4 := storageclient.New(*zone4URL)
+	// 2. Initialize Storage HTTP Client
+	z4 := storageclient.New(*storageURL)
 
 	// 3. Initialize Pipeline & Server
 	pl := pipeline.New(reg, z4)
@@ -50,7 +50,7 @@ func main() {
 	defer stop()
 
 	go func() {
-		log.Printf("zone3d listening on %s (db=%s, zone4=%s)", *addr, *dbPath, *zone4URL)
+		log.Printf("pipelined listening on %s (db=%s, storage=%s)", *addr, *dbPath, *storageURL)
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("http server: %v", err)
 		}
