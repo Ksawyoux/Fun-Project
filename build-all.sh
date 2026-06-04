@@ -3,19 +3,22 @@
 set -e
 
 echo "🏗️ Building supervisor..."
-go build -tags netgo -ldflags '-s -w' -o app ./cmd/archgraph
+go build -tags netgo -ldflags '-s -w' -o cmd/archgraph/archgraph ./cmd/archgraph
 
-echo "🏗️ Building Zone 2..."
-go build -tags netgo -ldflags '-s -w' -o zone2/zone2d ./zone2/cmd/zone2d
+echo "🏗️ Building Ingestion Subsystem..."
+go build -tags netgo -ldflags '-s -w' -o ingestion/ingestiond ./ingestion/cmd/ingestiond
 
-echo "🏗️ Building Zone 3..."
-go build -tags netgo -ldflags '-s -w' -o zone3/zone3d ./zone3/cmd/zone3d
+echo "🏗️ Building Processing Pipeline..."
+go build -tags netgo -ldflags '-s -w' -o pipeline/pipelined ./pipeline/cmd/pipelined
 
-echo "🏗️ Building Zone 4..."
-go build -tags netgo -ldflags '-s -w' -o zone4/zone4d ./zone4/cmd/zone4d
+echo "🏗️ Building Graph Storage..."
+go build -tags netgo -ldflags '-s -w' -o storage/storaged ./storage/cmd/storaged
 
-echo "🏗️ Building Zone 5..."
-go build -tags netgo -ldflags '-s -w' -o zone5/zone5d ./zone5/cmd/zone5d
+echo "🏗️ Building Serving Layer..."
+go build -tags netgo -ldflags '-s -w' -o serving/servingd ./serving/cmd/servingd
+
+echo "🏗️ Building Consumer Interfaces (CLI)..."
+go build -tags netgo -ldflags '-s -w' -o interfaces/archgraph-cli ./interfaces/cmd/archgraph-cli
 
 echo "✅ All components compiled successfully!"
 

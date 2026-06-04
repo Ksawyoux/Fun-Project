@@ -4,14 +4,14 @@ Welcome to the **AI Codebase Knowledge Graph** repository. This project is a sta
 
 ---
 
-## 🗺️ High-Level Architecture (The 6 Zones)
+## 🗺️ High-Level Architecture (The 6 Components)
 
-The system is organized into **6 logical zones**, running from signal capture all the way to user interaction interfaces. Here is how they connect:
+The system is organized into **6 logical components**, running from signal capture all the way to user interaction interfaces. Here is how they connect:
 
 ```mermaid
 %%{init: {'theme': 'dark'}}%%
 flowchart TD
-    subgraph Zone1 ["Zone 1: Signal Sources"]
+    subgraph SignalSources ["Signal Sources"]
         Git["Git Repositories"]
         AST["AST Code Parsers"]
         APIs["API Specifications"]
@@ -19,14 +19,14 @@ flowchart TD
         Metrics["Metrics & APM"]
     end
 
-    subgraph Zone2 ["Zone 2: Ingestion Subsystem"]
+    subgraph Ingestion ["Ingestion Subsystem"]
         Connectors["Source Connectors"]
         Ingestors["Ingestor Pool"]
         NIF["NIF Normalizer"]
         Ledger["Ingestion Ledger & Event Bus"]
     end
 
-    subgraph Zone3 ["Zone 3: Processing Pipeline"]
+    subgraph Pipeline ["Processing Pipeline"]
         Parse["Parse & Classify"]
         Resolve["Entity ID Resolver"]
         Infer["Relationship Inferrer"]
@@ -34,20 +34,20 @@ flowchart TD
         Delta["Delta Compute"]
     end
 
-    subgraph Zone4 ["Zone 4: Graph Storage"]
+    subgraph Storage ["Graph Storage"]
         MutationAPI["Mutation API"]
         GraphDB["Live Graph DB (SQLite)"]
         DeltaLog["Delta Log (Source of Truth)"]
     end
 
-    subgraph Zone5 ["Zone 5: Intelligence & Serving"]
+    subgraph Serving ["Intelligence & Serving"]
         QueryEngine["Query Engine"]
         Analytics["Specialized Analytics (Blast Radius & Health SCC)"]
         LLMReason["LLM Reasoner & Context Assembler"]
         PublicAPI["Public API (REST)"]
     end
 
-    subgraph Zone6 ["Zone 6: Consumer Interfaces"]
+    subgraph Interfaces ["Consumer Interfaces"]
         IDE["IDE Plugins"]
         WebDash["Web Dashboard"]
         CLI["CLI Tool & CI Gates"]
@@ -64,12 +64,12 @@ flowchart TD
     PublicAPI --> IDE & WebDash & CLI
 
     %% Subgraph Styling
-    style Zone1 fill:#162447,stroke:#1f4068,stroke-width:2px,color:#e4e4e4
-    style Zone2 fill:#1b4332,stroke:#2d6a4f,stroke-width:2px,color:#e4e4e4
-    style Zone3 fill:#6f5e13,stroke:#9a7b1c,stroke-width:2px,color:#e4e4e4
-    style Zone4 fill:#5c0c0c,stroke:#7f1d1d,stroke-width:2px,color:#e4e4e4
-    style Zone5 fill:#3b135c,stroke:#521c7d,stroke-width:2px,color:#e4e4e4
-    style Zone6 fill:#2b1d1d,stroke:#3d2b2b,stroke-width:2px,color:#e4e4e4
+    style SignalSources fill:#162447,stroke:#1f4068,stroke-width:2px,color:#e4e4e4
+    style Ingestion fill:#1b4332,stroke:#2d6a4f,stroke-width:2px,color:#e4e4e4
+    style Pipeline fill:#6f5e13,stroke:#9a7b1c,stroke-width:2px,color:#e4e4e4
+    style Storage fill:#5c0c0c,stroke:#7f1d1d,stroke-width:2px,color:#e4e4e4
+    style Serving fill:#3b135c,stroke:#521c7d,stroke-width:2px,color:#e4e4e4
+    style Interfaces fill:#2b1d1d,stroke:#3d2b2b,stroke-width:2px,color:#e4e4e4
 
     %% Node Styling Class for Dark Mode Contrast
     classDef darkNode fill:#1e1e24,stroke:#44444c,stroke-width:1px,color:#ffffff;
@@ -87,11 +87,11 @@ The sequence below illustrates how a change in the codebase propagates through t
 sequenceDiagram
     autonumber
     actor Dev as Developer / Codebase
-    participant Z1 as Zone 1: Signal Sources
-    participant Z2 as Zone 2: Ingestion
-    participant Z3 as Zone 3: Pipeline
-    participant Z4 as Zone 4: Graph Storage
-    participant Z5 as Zone 5: Intelligence
+    participant Z1 as Signal Sources
+    participant Z2 as Ingestion
+    participant Z3 as Pipeline
+    participant Z4 as Graph Storage
+    participant Z5 as Serving
 
     Dev->>Z1: Code Push / API change / Trace hit
     Z1->>Z2: Emit raw event
@@ -117,17 +117,17 @@ The repository is structured as a Go multi-module workspace containing the prima
 * **[cmd/archgraph/](file:///Users/MacBook/Fun_Project/Fun-Project/cmd/archgraph)** — Supervisor tool to coordinate local development.
 * **[documentation/](file:///Users/MacBook/Fun_Project/Fun-Project/documentation)** — High-level architecture and system design specs.
   * **[HighLevelArchi.md](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/HighLevelArchi.md)** — Architectural Overview.
-  * **[Zone 1 Specifications](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/Zone1.md)** | **[Zone 2 Specifications](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/Zone2.md)** | **[Zone 3 Specifications](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/Zone3.md)**
-  * **[Zone 4 Specifications](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/Zone4.md)** | **[Zone 5 Specifications](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/Zone5.md)** | **[Zone 6 Specifications](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/Zone6.md)**
-* **[zone4/](file:///Users/MacBook/Fun_Project/Fun-Project/zone4)** — Zone 4 (Graph Storage) Go module.
-* **[zone5/](file:///Users/MacBook/Fun_Project/Fun-Project/zone5)** — Zone 5 (Intelligence & Serving Layer) Go module.
-* **[zone6/](file:///Users/MacBook/Fun_Project/Fun-Project/zone6)** — Zone 6 (Consumer Interfaces - CLI & MCP Server) Go module.
+  * **[Signal Sources Specifications](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/signal_sources.md)** | **[Ingestion Specifications](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/ingestion.md)** | **[Pipeline Specifications](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/pipeline.md)**
+  * **[Storage Specifications](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/storage.md)** | **[Serving Specifications](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/serving.md)** | **[Interfaces Specifications](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/interfaces.md)**
+* **[storage/](file:///Users/MacBook/Fun_Project/Fun-Project/zone4)** — Storage (Graph Storage) Go module.
+* **[serving/](file:///Users/MacBook/Fun_Project/Fun-Project/zone5)** — Serving (Intelligence & Serving Layer) Go module.
+* **[interfaces/](file:///Users/MacBook/Fun_Project/Fun-Project/zone6)** — Interfaces (Consumer Interfaces - CLI & MCP Server) Go module.
 
 ---
 
 ## ⚡ Quick Start: Running the Entire System
 
-A supervisor tool is provided to start all implemented zones in their correct dependency order under a single terminal command. It starts Zone 4 (Graph Storage), Zone 3 (Processing Pipeline), Zone 2 (Ingestion), and Zone 5 (Intelligence Layer), wiring the default ingestion path as Zone 2 → Zone 3 → Zone 4.
+A supervisor tool is provided to start all implemented zones in their correct dependency order under a single terminal command. It starts Storage (Graph Storage), Pipeline (Processing Pipeline), Ingestion (Ingestion), and Serving (Intelligence Layer), wiring the default ingestion path as Ingestion → Pipeline → Storage.
 
 ### Prerequisites
 
@@ -163,23 +163,23 @@ make check
 ```
 
 #### Available Flags for the Supervisor:
-* `-root` — Path to the project root containing `zone2/`, `zone3/`, `zone4/`, and `zone5/` (default `.`)
-* `-zone2-port` — Port for the Zone 2 daemon (default `8083`)
-* `-zone3-port` — Port for the Zone 3 daemon (default `8082`)
-* `-zone4-port` — Port for the Zone 4 daemon (default `8080`)
-* `-zone5-port` — Port for the Zone 5 daemon (default `8081`)
-* `-db` — SQLite database path passed to Zone 4 (default `zone4.db`)
-* `-zone3-db` — SQLite registry database path passed to Zone 3 (default `zone3.db`)
-* `-zone2-config` — Source config passed to Zone 2 (empty scans supervisor CWD)
-* `-ready-timeout` — Max time to wait for Zone 4 to become healthy (default `30s`)
+* `-root` — Path to the project root containing `ingestion/`, `pipeline/`, `storage/`, and `serving/` (default `.`)
+* `-zone2-port` — Port for the Ingestion daemon (default `8083`)
+* `-zone3-port` — Port for the Pipeline daemon (default `8082`)
+* `-zone4-port` — Port for the Storage daemon (default `8080`)
+* `-zone5-port` — Port for the Serving daemon (default `8081`)
+* `-db` — SQLite database path passed to Storage (default `storage.db`)
+* `-pipeline-db` — SQLite registry database path passed to Pipeline (default `pipeline.db`)
+* `-zone2-config` — Source config passed to Ingestion (empty scans supervisor CWD)
+* `-ready-timeout` — Max time to wait for Storage to become healthy (default `30s`)
 
 Once running, you will see prefixed logs (`[zone2]`, `[zone3]`, `[zone4]`, and `[zone5]`) interleaved readably in your terminal. On termination (`Ctrl+C`), all services will be gracefully shut down.
 
 ---
 
-## 🟩 Zone 2 — Ingestion Subsystem (MVP)
+## 🟩 Ingestion — Ingestion Subsystem (MVP)
 
-Located in **[zone2/](file:///Users/MacBook/Fun_Project/Fun-Project/zone2)**, this module reaches into signal sources (Zone 1), normalizes raw records into a **Normalized Ingestion Format (NIF)**, and delivers them downstream. Source isolation is enforced: nothing downstream knows about Git, filesystems, or AST nodes — only NIF.
+Located in **[ingestion/](file:///Users/MacBook/Fun_Project/Fun-Project/zone2)**, this module reaches into signal sources (Signal Sources), normalizes raw records into a **Normalized Ingestion Format (NIF)**, and delivers them downstream. Source isolation is enforced: nothing downstream knows about Git, filesystems, or AST nodes — only NIF.
 
 ### Key Features
 * **Source Connectors:** Pull-based connectors that scan local repositories on demand.
@@ -195,13 +195,13 @@ Located in **[zone2/](file:///Users/MacBook/Fun_Project/Fun-Project/zone2)**, th
 * `GET /v1/staleness` — Check freshness of previously ingested sources.
 * `GET /v1/health` — Liveness probe.
 
-For more details, see the **[Zone 2 README](file:///Users/MacBook/Fun_Project/Fun-Project/zone2/README.md)**.
+For more details, see the **[Ingestion README](file:///Users/MacBook/Fun_Project/Fun-Project/ingestion/README.md)**.
 
 ---
 
-## 🟨 Zone 3 — Processing Pipeline (MVP)
+## 🟨 Pipeline — Processing Pipeline (MVP)
 
-Located in **[zone3/](file:///Users/MacBook/Fun_Project/Fun-Project/zone3)**, this module is the intelligence layer between raw ingestion and the graph store. It transforms ambiguous, multi-source NIF records into confident, resolved, enriched graph mutations ready for Zone 4.
+Located in **[pipeline/](file:///Users/MacBook/Fun_Project/Fun-Project/zone3)**, this module is the intelligence layer between raw ingestion and the graph store. It transforms ambiguous, multi-source NIF records into confident, resolved, enriched graph mutations ready for Storage.
 
 ### Key Features
 * **6-Stage Pipeline:** Records flow through Parse & Classify → Entity Resolution → Relationship Inference → Enrichment → Validation → Delta Computation.
@@ -209,19 +209,19 @@ Located in **[zone3/](file:///Users/MacBook/Fun_Project/Fun-Project/zone3)**, th
 * **Confidence Scoring:** Every entity and relationship is scored using multi-signal weighted heuristics (exact match, fuzzy match, structural match, co-occurrence, temporal).
 * **Relationship Inference:** Automatically derives hidden dependencies — shared database coupling (`CHANGE_COUPLED_WITH`), transitive structural chains, and runtime co-occurrence patterns.
 * **Enrichment:** Computes ownership, velocity, criticality, and maturity scores per entity using configurable scoring rules.
-* **Delta Computation:** Compares pipeline output against current graph state (via Zone 4) and emits minimal, batched mutation plans.
+* **Delta Computation:** Compares pipeline output against current graph state (via Storage) and emits minimal, batched mutation plans.
 
 ### Key Endpoints (Port 8082)
 * `POST /v1/ingest` — Submit a batch of NIF records for full pipeline processing.
 * `GET /v1/health` — Liveness probe.
 
-For more details, see the **[Zone 3 Specifications](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/Zone3.md)**.
+For more details, see the **[Pipeline Specifications](file:///Users/MacBook/Fun_Project/Fun-Project/documentation/pipeline.md)**.
 
 ---
 
-## 🟥 Zone 4 — Graph Storage (MVP)
+## 🟥 Storage — Graph Storage (MVP)
 
-Located in **[zone4/](file:///Users/MacBook/Fun_Project/Fun-Project/zone4)**, this is a single-process, SQLite-backed implementation of the graph storage layer.
+Located in **[storage/](file:///Users/MacBook/Fun_Project/Fun-Project/zone4)**, this is a single-process, SQLite-backed implementation of the graph storage layer.
 
 ### Key Features
 * **Mutation API:** A single write entry point that handles batches of mutations, enforces schema validation, and performs optimistic locking.
@@ -235,13 +235,13 @@ Located in **[zone4/](file:///Users/MacBook/Fun_Project/Fun-Project/zone4)**, th
 * `GET /v1/entities/{id}/neighborhood?depth=N` — Retrieve N-hop relationship neighborhood.
 * `GET /v1/log?from_entry_id=N&limit=M` — Read the raw delta log entries.
 
-For more details, see the **[Zone 4 README](file:///Users/MacBook/Fun_Project/Fun-Project/zone4/README.md)**.
+For more details, see the **[Storage README](file:///Users/MacBook/Fun_Project/Fun-Project/storage/README.md)**.
 
 ---
 
-## 🟪 Zone 5 — Intelligence & Serving Layer (MVP)
+## 🟪 Serving Layer (MVP)
 
-Located in **[zone5/](file:///Users/MacBook/Fun_Project/Fun-Project/zone5)**, this service is the reasoning brain of the system. It sits on top of Zone 4 and translates graph facts into architectural intelligence.
+Located in **[serving/](file:///Users/MacBook/Fun_Project/Fun-Project/zone5)**, this service is the reasoning brain of the system. It sits on top of Storage and translates graph facts into architectural intelligence.
 
 ### Key Features
 * **Query Engine:** Parses incoming natural language questions and routes them to Query Archetypes (Structural, Runtime, Temporal, Impact, Governance).
@@ -258,13 +258,13 @@ Located in **[zone5/](file:///Users/MacBook/Fun_Project/Fun-Project/zone5)**, th
 * `GET /v1/health-audit` — Scan the graph for cycles and microservice design violations.
 * `GET /v1/diff?from=N&to=M` — Diff the architecture between two log sequences.
 
-For more details, see the **[Zone 5 README](file:///Users/MacBook/Fun_Project/Fun-Project/zone5/README.md)**.
+For more details, see the **[Serving README](file:///Users/MacBook/Fun_Project/Fun-Project/serving/README.md)**.
 
 ---
 
-## 🟫 Zone 6 — Consumer Interfaces (CLI & MCP)
+## 🟫 Consumer Interfaces (CLI & MCP)
 
-Located in **[zone6/](file:///Users/MacBook/Fun_Project/Fun-Project/zone6)**, this module contains the user interaction interfaces, acting as both an interactive command-line tool (`archgraph`) and a Model Context Protocol (MCP) server over `stdio`.
+Located in **[interfaces/](file:///Users/MacBook/Fun_Project/Fun-Project/zone6)**, this module contains the user interaction interfaces, acting as both an interactive command-line tool (`archgraph`) and a Model Context Protocol (MCP) server over `stdio`.
 
 ### Key CLI Subcommands
 
@@ -304,18 +304,18 @@ When run via `archgraph mcp`, the binary acts as an MCP server over standard inp
 
 Primary modules are fully testable and compile cleanly:
 
-**Compile Zone 6 CLI:**
+**Compile Interfaces CLI:**
 ```bash
 cd zone6
 go build -o archgraph ./cmd/archgraph-cli
 ```
 
 **Run Tests:**
-* **Zone 4 Graph Storage:**
+* **Storage Graph Storage:**
   ```bash
   cd zone4 && go test ./...
   ```
-* **Zone 5 Intelligence Layer:**
+* **Serving Intelligence Layer:**
   ```bash
   cd zone5 && go test ./...
   ```

@@ -183,7 +183,7 @@ else
   CONFIG_BODY="${AST_GO_BLOCK#,}"
 fi
 
-# Generate a temporary sources.json for Zone 2
+# Generate a temporary sources.json for Ingestion Subsystem
 CONFIG_PATH="/tmp/archgraph_sources.json"
 echo -e "${BLUE}[2/5] Generating ingestion config at:${NC} $CONFIG_PATH"
 cat <<EOF > "$CONFIG_PATH"
@@ -201,10 +201,10 @@ namespace: "$NAMESPACE"
 EOF
 
 # Start the supervisor in the background
-echo -e "${BLUE}[3/5] Starting ArchGraph services (Zones 2-5)...${NC}"
+echo -e "${BLUE}[3/5] Starting ArchGraph services (Ingestion, Pipeline, Storage, Serving)...${NC}"
 # We'll redirect supervisor output to a log file to keep the terminal clean
 LOG_FILE="/tmp/archgraph_supervisor.log"
-(cd "$PROJECT_ROOT/cmd/archgraph" && go run . -root ../.. -zone2-config "$CONFIG_PATH") > "$LOG_FILE" 2>&1 &
+(cd "$PROJECT_ROOT/cmd/archgraph" && go run . -root ../.. -ingestion-config "$CONFIG_PATH") > "$LOG_FILE" 2>&1 &
 SUPERVISOR_PID=$!
 
 function cleanup() {
@@ -220,7 +220,7 @@ function cleanup() {
   echo -e "${GREEN}✅ Done.${NC}"
 }
 
-# Wait for Zone 2 and Zone 4 to be healthy
+# Wait for Ingestion and Storage to be healthy
 echo -n -e "${BLUE}[4/5] Waiting for services to become healthy...${NC}"
 for i in {1..30}; do
   if curl -s http://localhost:8083/v1/health >/dev/null && curl -s http://localhost:8080/v1/health >/dev/null; then
@@ -261,12 +261,12 @@ sleep 1
 # Run the CLI to print the graph
 echo -e "\n${GREEN}📊 Codebase Dependency Graph:${NC}"
 echo -e "${GREEN}---------------------------------${NC}"
-(cd "$PROJECT_ROOT/zone6" && go run ./cmd/archgraph-cli -zone4 http://localhost:8080 -zone5 http://localhost:8081 -config "$CLI_CONFIG_PATH" graph)
+(cd "$PROJECT_ROOT/interfaces" && go run ./cmd/archgraph-cli -storage http://localhost:8080 -serving http://localhost:8081 -config "$CLI_CONFIG_PATH" graph)
 
 # Prompt for interactive queries
 echo -e "\n${CYAN}💡 You can now query the serving layer in natural language.${NC}"
 echo -e "${CYAN}Press Ctrl+C to terminate services and exit.${NC}"
-echo -e "${CYAN}Example query: (cd zone6 && go run ./cmd/archgraph-cli -config \"$CLI_CONFIG_PATH\" query \"Which packages depend on main?\")"
+echo -e "${CYAN}Example query: (cd interfaces && go run ./cmd/archgraph-cli -config \"$CLI_CONFIG_PATH\" query \"Which packages depend on main?\")"
 
 # Block and wait
 wait $SUPERVISOR_PID

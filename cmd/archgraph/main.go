@@ -1,19 +1,19 @@
-// Command archgraph is a process supervisor that brings up every zone in
+// Command archgraph is a process supervisor that brings up the services in
 // the right order and tears them down cleanly on shutdown.
 //
-// Why a supervisor and not one fused binary: Zone 4 and Zone 5 are
+// Why a supervisor and not one fused binary: Storage and Serving are
 // independent Go modules whose internal packages can't be cross-imported.
 // Running them as siblings under one parent matches the production shape
-// (each zone is a service) and keeps the local dev story to "one command".
+// (each module is a service) and keeps the local dev story to "one command".
 //
 // Order:
-//   1. zone4d on :8080 — graph storage daemon
+//   1. storaged on :8080 — graph storage daemon
 //   2. wait for /v1/health to return 200
-//   3. zone5d on :8081 — intelligence layer, pointed at zone4d
+//   3. servingd on :8081 — intelligence/serving layer, pointed at storaged
 //
-// Output from each child is prefixed with [zone4] / [zone5] so two streams
+// Output from each child is prefixed with [storage] / [serving] so two streams
 // interleave readably in the parent terminal. Ctrl+C (or SIGTERM) is
-// propagated to both children; they each have their own graceful shutdown.
+// propagated to all children; they each have their own graceful shutdown.
 package main
 
 import (
@@ -37,16 +37,16 @@ import (
 
 func main() {
 	var (
-		rootDir   = flag.String("root", ".", "Project root containing zone3/, zone4/, and zone5/")
-		zone4Port = flag.String("zone4-port", "8080", "Port for zone4d")
-		zone3Port = flag.String("zone3-port", "8082", "Port for zone3d")
-		zone5Port = flag.String("zone5-port", "8081", "Port for zone5d")
-		zone2Port = flag.String("zone2-port", "8083", "Port for zone2d")
-		dbPath    = flag.String("db", "zone4.db", "SQLite database path passed to zone4d")
-		zone3Db   = flag.String("zone3-db", "zone3.db", "SQLite database path passed to zone3d")
-		zone2State = flag.String("zone2-state", "zone2-state", "State directory for zone2d (checkpoints, ledger, DLQ)")
-		zone2Config = flag.String("zone2-config", "", "Path to zone2d config JSON; empty = scan supervisor CWD as one source")
-		readyWait = flag.Duration("ready-timeout", 30*time.Second, "Time to wait for zones to become healthy before giving up")
+		rootDir         = flag.String("root", ".", "Project root containing pipeline/, storage/, and serving/")
+		storagePort     = flag.String("storage-port", "8080", "Port for storaged")
+		pipelinePort    = flag.String("pipeline-port", "8082", "Port for pipelined")
+		servingPort     = flag.String("serving-port", "8081", "Port for servingd")
+		ingestionPort   = flag.String("ingestion-port", "8083", "Port for ingestiond")
+		dbPath          = flag.String("db", "storage.db", "SQLite database path passed to storaged")
+		pipelineDb      = flag.String("pipeline-db", "pipeline.db", "SQLite database path passed to pipelined")
+		ingestionState  = flag.String("ingestion-state", "ingestion-state", "State directory for ingestiond (checkpoints, ledger, DLQ)")
+		ingestionConfig = flag.String("ingestion-config", "", "Path to ingestiond config JSON; empty = scan supervisor CWD as one source")
+		readyWait       = flag.Duration("ready-timeout", 30*time.Second, "Time to wait for services to become healthy before giving up")
 	)
 	flag.Parse()
 
@@ -54,12 +54,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("resolve root: %v", err)
 	}
-	zone2Dir := filepath.Join(absRoot, "zone2")
-	zone3Dir := filepath.Join(absRoot, "zone3")
-	zone4Dir := filepath.Join(absRoot, "zone4")
-	zone5Dir := filepath.Join(absRoot, "zone5")
-	if !dirExists(zone2Dir) || !dirExists(zone3Dir) || !dirExists(zone4Dir) || !dirExists(zone5Dir) {
-		log.Fatalf("expected zone2/, zone3/, zone4/ and zone5/ under %s — pass -root if running from elsewhere", absRoot)
+	ingestionDir := filepath.Join(absRoot, "ingestion")
+	pipelineDir := filepath.Join(absRoot, "pipeline")
+	storageDir := filepath.Join(absRoot, "storage")
+	servingDir := filepath.Join(absRoot, "serving")
+	if !dirExists(ingestionDir) || !dirExists(pipelineDir) || !dirExists(storageDir) || !dirExists(servingDir) {
+		log.Fatalf("expected ingestion/, pipeline/, storage/ and serving/ under %s — pass -root if running from elsewhere", absRoot)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -67,73 +67,43 @@ func main() {
 
 	var wg sync.WaitGroup
 
-	zone4Addr := ":" + *zone4Port
-	zone3Addr := ":" + *zone3Port
-	zone5Addr := ":" + *zone5Port
-	zone2Addr := ":" + *zone2Port
-	zone4URL := "http://localhost:" + *zone4Port
-	zone3URL := "http://localhost:" + *zone3Port
-	zone2URL := "http://localhost:" + *zone2Port
+	storageAddr := ":" + *storagePort
+	pipelineAddr := ":" + *pipelinePort
+	servingAddr := ":" + *servingPort
+	ingestionAddr := ":" + *ingestionPort
+	storageURL := "http://localhost:" + *storagePort
+	pipelineURL := "http://localhost:" + *pipelinePort
+	ingestionURL := "http://localhost:" + *ingestionPort
 
-	// --- Boot zone4d ---
-	zone4Cmd, err := startZone(ctx, "zone4", zone4Dir, "./cmd/zone4d",
-		"-addr", zone4Addr, "-db", *dbPath)
+	// --- Boot storaged ---
+	storageCmd, err := startZone(ctx, "storage", storageDir, "./cmd/storaged",
+		"-addr", storageAddr, "-db", *dbPath)
 	if err != nil {
-		log.Fatalf("start zone4: %v", err)
+		log.Fatalf("start storage: %v", err)
 	}
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := zone4Cmd.Wait(); err != nil && !isSignalErr(err) {
-			log.Printf("[archgraph] zone4 exited: %v", err)
-			stop() // bring everything down if zone4 dies unexpectedly
+		if err := storageCmd.Wait(); err != nil && !isSignalErr(err) {
+			log.Printf("[archgraph] storage exited: %v", err)
+			stop() // bring everything down if storage dies unexpectedly
 		}
 	}()
 
-	// --- Wait for zone4 health ---
-	if err := waitHealthy(ctx, zone4URL+"/v1/health", *readyWait); err != nil {
-		log.Printf("[archgraph] zone4 never became healthy: %v", err)
+	// --- Wait for storage health ---
+	if err := waitHealthy(ctx, storageURL+"/v1/health", *readyWait); err != nil {
+		log.Printf("[archgraph] storage never became healthy: %v", err)
 		stop()
 		wg.Wait()
 		os.Exit(1)
 	}
-	log.Printf("[archgraph] zone4 is healthy at %s", zone4URL)
+	log.Printf("[archgraph] storage is healthy at %s", storageURL)
 
-	// --- Boot zone3d ---
-	zone3Cmd, err := startZone(ctx, "zone3", zone3Dir, "./cmd/zone3d",
-		"-addr", zone3Addr, "-db", *zone3Db, "-zone4", zone4URL)
+	// --- Boot pipelined ---
+	pipelineCmd, err := startZone(ctx, "pipeline", pipelineDir, "./cmd/pipelined",
+		"-addr", pipelineAddr, "-db", *pipelineDb, "-storage", storageURL)
 	if err != nil {
-		log.Printf("[archgraph] start zone3: %v", err)
-		stop()
-		wg.Wait()
-		os.Exit(1)
-	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		if err := zone3Cmd.Wait(); err != nil && !isSignalErr(err) {
-			log.Printf("[archgraph] zone3 exited: %v", err)
-			stop() // bring everything down if zone3 dies unexpectedly
-		}
-	}()
-
-	// --- Wait for zone3 health ---
-	if err := waitHealthy(ctx, zone3URL+"/v1/health", *readyWait); err != nil {
-		log.Printf("[archgraph] zone3 never became healthy: %v", err)
-		stop()
-		wg.Wait()
-		os.Exit(1)
-	}
-	log.Printf("[archgraph] zone3 is healthy at %s", zone3URL)
-
-	// --- Boot zone2d ---
-	zone2Args := []string{"-addr", zone2Addr, "-state", *zone2State, "-zone3", zone3URL}
-	if *zone2Config != "" {
-		zone2Args = append(zone2Args, "-config", *zone2Config)
-	}
-	zone2Cmd, err := startZone(ctx, "zone2", zone2Dir, "./cmd/zone2d", zone2Args...)
-	if err != nil {
-		log.Printf("[archgraph] start zone2: %v", err)
+		log.Printf("[archgraph] start pipeline: %v", err)
 		stop()
 		wg.Wait()
 		os.Exit(1)
@@ -141,23 +111,53 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := zone2Cmd.Wait(); err != nil && !isSignalErr(err) {
-			log.Printf("[archgraph] zone2 exited: %v", err)
+		if err := pipelineCmd.Wait(); err != nil && !isSignalErr(err) {
+			log.Printf("[archgraph] pipeline exited: %v", err)
+			stop() // bring everything down if pipeline dies unexpectedly
 		}
 	}()
 
-	if err := waitHealthy(ctx, zone2URL+"/v1/health", *readyWait); err != nil {
-		log.Printf("[archgraph] zone2 never became healthy: %v", err)
-		// non-fatal: zone2 might just have no ingestors yet
+	// --- Wait for pipeline health ---
+	if err := waitHealthy(ctx, pipelineURL+"/v1/health", *readyWait); err != nil {
+		log.Printf("[archgraph] pipeline never became healthy: %v", err)
+		stop()
+		wg.Wait()
+		os.Exit(1)
+	}
+	log.Printf("[archgraph] pipeline is healthy at %s", pipelineURL)
+
+	// --- Boot ingestiond ---
+	ingestionArgs := []string{"-addr", ingestionAddr, "-state", *ingestionState, "-pipeline", pipelineURL}
+	if *ingestionConfig != "" {
+		ingestionArgs = append(ingestionArgs, "-config", *ingestionConfig)
+	}
+	ingestionCmd, err := startZone(ctx, "ingestion", ingestionDir, "./cmd/ingestiond", ingestionArgs...)
+	if err != nil {
+		log.Printf("[archgraph] start ingestion: %v", err)
+		stop()
+		wg.Wait()
+		os.Exit(1)
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := ingestionCmd.Wait(); err != nil && !isSignalErr(err) {
+			log.Printf("[archgraph] ingestion exited: %v", err)
+		}
+	}()
+
+	if err := waitHealthy(ctx, ingestionURL+"/v1/health", *readyWait); err != nil {
+		log.Printf("[archgraph] ingestion never became healthy: %v", err)
+		// non-fatal: ingestion might just have no ingestors yet
 	} else {
-		log.Printf("[archgraph] zone2 is healthy at %s", zone2URL)
+		log.Printf("[archgraph] ingestion is healthy at %s", ingestionURL)
 	}
 
-	// --- Boot zone5d ---
-	zone5Cmd, err := startZone(ctx, "zone5", zone5Dir, "./cmd/zone5d",
-		"-addr", zone5Addr, "-zone4", zone4URL)
+	// --- Boot servingd ---
+	servingCmd, err := startZone(ctx, "serving", servingDir, "./cmd/servingd",
+		"-addr", servingAddr, "-storage", storageURL)
 	if err != nil {
-		log.Printf("[archgraph] start zone5: %v", err)
+		log.Printf("[archgraph] start serving: %v", err)
 		stop()
 		wg.Wait()
 		os.Exit(1)
@@ -165,30 +165,30 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := zone5Cmd.Wait(); err != nil && !isSignalErr(err) {
-			log.Printf("[archgraph] zone5 exited: %v", err)
+		if err := servingCmd.Wait(); err != nil && !isSignalErr(err) {
+			log.Printf("[archgraph] serving exited: %v", err)
 		}
 	}()
 
-	log.Printf("[archgraph] all zones up — zone2 on :%s, zone3 on :%s, zone5 on :%s (talks to zone4 at %s)", *zone2Port, *zone3Port, *zone5Port, zone4URL)
+	log.Printf("[archgraph] all services up — ingestion on :%s, pipeline on :%s, serving on :%s (talks to storage at %s)", *ingestionPort, *pipelinePort, *servingPort, storageURL)
 
 	// Block until signal or a child dies and triggered stop().
 	<-ctx.Done()
 	log.Printf("[archgraph] shutdown signal received; sending SIGTERM to children")
 
-	// Best-effort graceful kill. Both zoneNd binaries handle SIGTERM and
+	// Best-effort graceful kill. Both ingestiond/pipelined/storaged/servingd binaries handle SIGTERM and
 	// run their own http.Server.Shutdown.
-	if zone5Cmd != nil && zone5Cmd.Process != nil {
-		_ = zone5Cmd.Process.Signal(syscall.SIGTERM)
+	if servingCmd != nil && servingCmd.Process != nil {
+		_ = servingCmd.Process.Signal(syscall.SIGTERM)
 	}
-	if zone2Cmd != nil && zone2Cmd.Process != nil {
-		_ = zone2Cmd.Process.Signal(syscall.SIGTERM)
+	if ingestionCmd != nil && ingestionCmd.Process != nil {
+		_ = ingestionCmd.Process.Signal(syscall.SIGTERM)
 	}
-	if zone3Cmd != nil && zone3Cmd.Process != nil {
-		_ = zone3Cmd.Process.Signal(syscall.SIGTERM)
+	if pipelineCmd != nil && pipelineCmd.Process != nil {
+		_ = pipelineCmd.Process.Signal(syscall.SIGTERM)
 	}
-	if zone4Cmd != nil && zone4Cmd.Process != nil {
-		_ = zone4Cmd.Process.Signal(syscall.SIGTERM)
+	if storageCmd != nil && storageCmd.Process != nil {
+		_ = storageCmd.Process.Signal(syscall.SIGTERM)
 	}
 
 	// Give them up to 5s to exit cleanly, then kill.
@@ -196,20 +196,20 @@ func main() {
 	go func() { wg.Wait(); close(done) }()
 	select {
 	case <-done:
-		log.Printf("[archgraph] all zones stopped cleanly")
+		log.Printf("[archgraph] all services stopped cleanly")
 	case <-time.After(5 * time.Second):
 		log.Printf("[archgraph] timed out waiting for shutdown; killing")
-		if zone5Cmd != nil && zone5Cmd.Process != nil {
-			_ = zone5Cmd.Process.Kill()
+		if servingCmd != nil && servingCmd.Process != nil {
+			_ = servingCmd.Process.Kill()
 		}
-		if zone2Cmd != nil && zone2Cmd.Process != nil {
-			_ = zone2Cmd.Process.Kill()
+		if ingestionCmd != nil && ingestionCmd.Process != nil {
+			_ = ingestionCmd.Process.Kill()
 		}
-		if zone3Cmd != nil && zone3Cmd.Process != nil {
-			_ = zone3Cmd.Process.Kill()
+		if pipelineCmd != nil && pipelineCmd.Process != nil {
+			_ = pipelineCmd.Process.Kill()
 		}
-		if zone4Cmd != nil && zone4Cmd.Process != nil {
-			_ = zone4Cmd.Process.Kill()
+		if storageCmd != nil && storageCmd.Process != nil {
+			_ = storageCmd.Process.Kill()
 		}
 		<-done
 	}

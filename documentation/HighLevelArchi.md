@@ -68,7 +68,7 @@ The system has **5 major zones**:
 
 ---
 
-### 🟦 Zone 1: Signal Sources
+### 🟦 Signal Sources
 
 What feeds the system.
 
@@ -102,7 +102,7 @@ Two categories:
 
 ---
 
-### 🟩 Zone 2: Ingestion Subsystem
+### 🟩 Ingestion Subsystem
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -143,7 +143,7 @@ Key responsibilities:
 
 ---
 
-### 🟨 Zone 3: Processing Pipeline
+### 🟨 Processing Pipeline
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -202,7 +202,7 @@ Key responsibilities:
 
 ---
 
-### 🟥 Zone 4: Graph Storage
+### 🟥 Graph Storage
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -244,7 +244,7 @@ Key responsibilities:
 
 ---
 
-### 🟪 Zone 5: Intelligence & Serving Layer
+### 🟪 Intelligence & Serving Layer
 
 This is where the system becomes intelligent.
 
@@ -292,7 +292,7 @@ Key responsibilities:
 
 ---
 
-### 🟫 Zone 6: Consumer Interfaces
+### 🟫 Consumer Interfaces
 
 ```
 ┌──────────────────────────────────────────────────────────┐

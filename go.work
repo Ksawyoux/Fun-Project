@@ -2,10 +2,10 @@ go 1.22
 
 use (
 	./nif
-	./zone2
-	./zone3
-	./zone4
-	./zone5
-	./zone6
+	./ingestion
+	./pipeline
+	./storage
+	./serving
+	./interfaces
 	./cmd/archgraph
 )

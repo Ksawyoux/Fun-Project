@@ -1,7 +1,7 @@
 # Root Makefile — iterates the multi-module workspace.
-# Each zone is its own Go module; targets here fan out and aggregate.
+# Each service is its own Go module; targets here fan out and aggregate.
 
-MODULES := nif zone2 zone3 zone4 zone5 zone6 cmd/archgraph
+MODULES := nif ingestion pipeline storage serving interfaces cmd/archgraph
 
 .PHONY: test vet build check tidy clean help
 
@@ -41,7 +41,7 @@ tidy:
 	done
 
 clean:
-	rm -f zone6/archgraph cmd/archgraph/archgraph
-	rm -rf zone2/zone2-state zone2-state
-	rm -f zone4.db zone4.db-* zone3.db zone3.db-*
-	rm -f zone4/zone4.db* zone3/zone3.db*
+	rm -f interfaces/archgraph-cli cmd/archgraph/archgraph
+	rm -rf ingestion/ingestion-state ingestion-state
+	rm -f storage.db storage.db-* pipeline.db pipeline.db-*
+	rm -f storage/storage.db* pipeline/pipeline.db*
