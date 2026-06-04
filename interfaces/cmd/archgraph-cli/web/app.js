@@ -14,6 +14,7 @@ let filteredLinks = [];
 // Log & Replay State
 let logEntries = [];
 let currentLogIndex = -1;
+let gitCommits = [];
 
 // Selected & Highlight States
 let selectedNode = null;
@@ -50,6 +51,22 @@ function resize() {
 window.addEventListener("resize", resize);
 resize();
 
+// Load Git commits for timeline context
+async function loadGitCommits() {
+    try {
+        const resp = await fetch(`/api/commits?namespace=${encodeURIComponent(config.namespace)}`);
+        if (resp.ok) {
+            gitCommits = await resp.json();
+            console.log("Loaded Git commits:", gitCommits);
+        } else {
+            gitCommits = [];
+        }
+    } catch (e) {
+        console.warn("Could not load Git commits:", e);
+        gitCommits = [];
+    }
+}
+
 // Load Config & Bootstrap
 async function init() {
     try {
@@ -65,6 +82,7 @@ async function init() {
     document.getElementById("stat-namespace").textContent = config.namespace;
     
     // Fetch data
+    await loadGitCommits();
     await refreshGraphData();
     await loadTransactionLogs();
     
@@ -85,6 +103,7 @@ async function init() {
 // Fetch main graph data and health smells
 async function refreshGraphData() {
     try {
+        await loadGitCommits();
         const u = `${config.serving}/v1/entities?namespace=${encodeURIComponent(config.namespace)}`;
         const resp = await fetch(u);
         if (!resp.ok) throw new Error("Failed to fetch graph data");
@@ -370,6 +389,12 @@ function drawNode(node) {
     
     // Shorten name if too long
     let displayName = node.canonical_name;
+    if (node.type === "MODULE") {
+        displayName = node.properties?.package_name || displayName.split("/").pop();
+    } else if (node.type === "FUNCTION") {
+        const parts = displayName.split("/");
+        displayName = parts[parts.length - 1];
+    }
     if (displayName.length > 20) {
         displayName = displayName.substring(0, 17) + "...";
     }
@@ -816,7 +841,12 @@ function replayToCurrentState() {
 
     // 0 index is the complete graph (since we can reconstruct up to that point)
     if (currentLogIndex === logEntries.length) {
-        document.getElementById("timeline-commit-time").textContent = "Live System";
+        let commitLabel = "Live System";
+        if (gitCommits && gitCommits.length > 0) {
+            const latest = gitCommits[0];
+            commitLabel = `Live System (${latest.short_sha}: ${latest.subject})`;
+        }
+        document.getElementById("timeline-commit-time").textContent = commitLabel;
         document.getElementById("timeline-mutation-desc").textContent = "Current state projection";
         refreshGraphData();
         return;
@@ -829,15 +859,26 @@ function replayToCurrentState() {
     const nodeMap = new Map();
     const linkMap = new Map();
 
+    let currentSHA = null;
+    let lastEntry = null;
+
     // Replay log entries up to currentLogIndex
     for (let i = 0; i < currentLogIndex; i++) {
         const entry = logEntries[i];
-        const timeStr = new Date(entry.occurred_at).toLocaleTimeString();
-        document.getElementById("timeline-commit-time").textContent = `${timeStr} (Log #${entry.entry_id})`;
-        document.getElementById("timeline-mutation-desc").textContent = `${entry.mutation_type} ${entry.entity_id || entry.relationship_id || ""}`;
+        lastEntry = entry;
+        
+        // Extract head_sha if available in node properties
+        const props = entry.after_state?.properties || entry.before_state?.properties;
+        if (props && props.head_sha) {
+            currentSHA = props.head_sha;
+        }
 
         // Apply mutations
-        if (entry.mutation_type === "CREATE_ENTITY" || entry.mutation_type === "UPSERT_ENTITY") {
+        if (entry.mutation_type === "CREATE_ENTITY" || 
+            entry.mutation_type === "UPSERT_ENTITY" || 
+            entry.mutation_type === "ENTITY_CREATED" || 
+            entry.mutation_type === "ENTITY_UPDATED" || 
+            entry.mutation_type === "ENTITY_RESTORED") {
             const state = entry.after_state;
             if (state) {
                 nodeMap.set(entry.entity_id, {
@@ -847,12 +888,17 @@ function replayToCurrentState() {
                     sub_type: state.sub_type,
                     properties: state.properties,
                     confidence: state.confidence,
-                    is_active: state.is_active
+                    is_active: state.is_active,
+                    namespace: state.namespace
                 });
             }
-        } else if (entry.mutation_type === "DELETE_ENTITY") {
+        } else if (entry.mutation_type === "DELETE_ENTITY" || 
+                   entry.mutation_type === "ENTITY_SOFT_DELETED") {
             nodeMap.delete(entry.entity_id);
-        } else if (entry.mutation_type === "CREATE_RELATIONSHIP" || entry.mutation_type === "UPSERT_RELATIONSHIP") {
+        } else if (entry.mutation_type === "CREATE_RELATIONSHIP" || 
+                   entry.mutation_type === "UPSERT_RELATIONSHIP" || 
+                   entry.mutation_type === "RELATIONSHIP_CREATED" || 
+                   entry.mutation_type === "RELATIONSHIP_UPDATED") {
             const state = entry.after_state;
             if (state) {
                 linkMap.set(entry.relationship_id, {
@@ -864,9 +910,26 @@ function replayToCurrentState() {
                     is_active: state.is_active
                 });
             }
-        } else if (entry.mutation_type === "DELETE_RELATIONSHIP") {
+        } else if (entry.mutation_type === "DELETE_RELATIONSHIP" || 
+                   entry.mutation_type === "RELATIONSHIP_DELETED") {
             linkMap.delete(entry.relationship_id);
         }
+    }
+
+    // Update labels based on the final replayed state
+    if (lastEntry) {
+        const timeStr = new Date(lastEntry.occurred_at).toLocaleTimeString();
+        let commitLabel = `${timeStr} (Log #${lastEntry.entry_id})`;
+        if (currentSHA) {
+            const commit = gitCommits.find(c => c.sha === currentSHA || c.short_sha === currentSHA);
+            if (commit) {
+                commitLabel = `${commit.date} (${commit.short_sha}: ${commit.subject})`;
+            } else {
+                commitLabel = `${timeStr} (Commit: ${currentSHA.substring(0, 7)})`;
+            }
+        }
+        document.getElementById("timeline-commit-time").textContent = commitLabel;
+        document.getElementById("timeline-mutation-desc").textContent = `${lastEntry.mutation_type} ${lastEntry.entity_id || lastEntry.relationship_id || ""}`;
     }
 
     // Convert back to arrays
@@ -881,6 +944,7 @@ function replayToCurrentState() {
     const showDatabases = document.getElementById("filter-databases").checked;
 
     filteredNodes = reconstructedNodes.filter(node => {
+        if (node.namespace && node.namespace !== config.namespace) return false;
         if (node.type === "SERVICE" && !showServices) return false;
         if (node.type === "MODULE" && !showModules) return false;
         if (node.type === "FUNCTION" && !showFunctions) return false;

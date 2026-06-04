@@ -2247,6 +2247,65 @@ func handleDashboard(ctx context.Context, storageAddr, servingAddr, namespace st
 		_, _ = w.Write(buf.Bytes())
 	})
 
+	// Serve Git commits log
+	mux.HandleFunc("/api/commits", func(w http.ResponseWriter, r *http.Request) {
+		ns := r.URL.Query().Get("namespace")
+		src := r.URL.Query().Get("source_id")
+
+		repoPath := findWorkspaceRoot() // fallback to current workspace root
+		if ns != "" && ns != "local" && ns != "local-dev" && ns != "default" {
+			// Check /tmp/archgraph_clones/<ns>
+			tmpPath := filepath.Join("/tmp", "archgraph_clones", ns)
+			if _, err := os.Stat(tmpPath); err == nil {
+				repoPath = tmpPath
+			} else if src != "" {
+				tmpPathSrc := filepath.Join("/tmp", "archgraph_clones", src)
+				if _, err := os.Stat(tmpPathSrc); err == nil {
+					repoPath = tmpPathSrc
+				}
+			}
+		}
+
+		cmd := exec.Command("git", "log", "-n", "30", "--pretty=format:%H|%h|%an|%ad|%s", "--date=short")
+		cmd.Dir = repoPath
+		var out bytes.Buffer
+		cmd.Stdout = &out
+		if err := cmd.Run(); err != nil {
+			http.Error(w, "Failed to run git log: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		type commitInfo struct {
+			SHA      string `json:"sha"`
+			ShortSHA string `json:"short_sha"`
+			Author   string `json:"author"`
+			Date     string `json:"date"`
+			Subject  string `json:"subject"`
+		}
+
+		var commits []commitInfo
+		lines := strings.Split(out.String(), "\n")
+		for _, line := range lines {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			parts := strings.SplitN(line, "|", 5)
+			if len(parts) < 5 {
+				continue
+			}
+			commits = append(commits, commitInfo{
+				SHA:      parts[0],
+				ShortSHA: parts[1],
+				Author:   parts[2],
+				Date:     parts[3],
+				Subject:  parts[4],
+			})
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(commits)
+	})
+
 	// Serve static files
 	mux.Handle("/", http.FileServer(http.FS(subFS)))
 
