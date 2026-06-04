@@ -420,6 +420,9 @@ function setupEventHandlers() {
     document.getElementById("btn-blast-radius").addEventListener("click", simulateBlastRadius);
     document.getElementById("btn-clear-analysis").addEventListener("click", clearBlastRadius);
 
+    // Ingestion Button
+    document.getElementById("btn-ingest-repo").addEventListener("click", runRepositoryIngestion);
+
     // Canvas click & drag delegation
     d3.select(canvas)
         .on("mousemove", handleCanvasMouseMove)
@@ -896,6 +899,90 @@ function replayToCurrentState() {
     }));
 
     rebuildSimulation();
+}
+
+// Run Repository Ingestion API call
+async function runRepositoryIngestion() {
+    const urlInput = document.getElementById("ingest-repo-url");
+    const nsInput = document.getElementById("ingest-namespace");
+    const statusDiv = document.getElementById("ingest-status");
+
+    const repoURL = urlInput.value.trim();
+    let namespace = nsInput.value.trim();
+
+    if (!repoURL) {
+        statusDiv.className = "ingest-status error";
+        statusDiv.textContent = "Please enter a repository URL.";
+        statusDiv.classList.remove("hidden");
+        return;
+    }
+
+    // Set loading state
+    statusDiv.className = "ingest-status loading";
+    statusDiv.textContent = "📥 Cloning, scanning, and ingesting repository... This can take up to a minute.";
+    statusDiv.classList.remove("hidden");
+    
+    const btn = document.getElementById("btn-ingest-repo");
+    btn.disabled = true;
+
+    try {
+        const resp = await fetch("/api/ingest", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                repo_url: repoURL,
+                namespace: namespace,
+                languages: ["go"] // Default to scanning Go codebases
+            })
+        });
+
+        btn.disabled = false;
+
+        if (resp.ok) {
+            const data = await resp.json();
+            
+            // Clean inputs
+            urlInput.value = "";
+            nsInput.value = "";
+            
+            // If the backend auto-generated or completed under a specific namespace, use it
+            if (data.namespace) {
+                config.namespace = data.namespace;
+            } else if (namespace) {
+                config.namespace = namespace;
+            } else {
+                // Infer namespace from the repo url
+                const cleanURL = repoURL.replace(/\.git$/, "");
+                const parts = cleanURL.split("/");
+                config.namespace = parts[parts.length - 1] || "local";
+            }
+
+            statusDiv.className = "ingest-status success";
+            statusDiv.textContent = `✅ Ingestion successful! Loaded namespace: "${config.namespace}"`;
+            
+            // Update stats bar namespace label
+            document.getElementById("stat-namespace").textContent = config.namespace;
+
+            // Trigger reload of graph visualizer
+            await refreshGraphData();
+            await loadTransactionLogs();
+
+            // Auto-hide status after 5 seconds
+            setTimeout(() => {
+                statusDiv.classList.add("hidden");
+            }, 5000);
+        } else {
+            const errMsg = await resp.text();
+            statusDiv.className = "ingest-status error";
+            statusDiv.textContent = `❌ Ingestion failed: ${errMsg}`;
+        }
+    } catch (err) {
+        btn.disabled = false;
+        statusDiv.className = "ingest-status error";
+        statusDiv.textContent = `❌ Connection error: ${err.message}`;
+    }
 }
 
 // Bootstrap

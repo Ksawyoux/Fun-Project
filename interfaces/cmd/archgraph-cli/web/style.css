@@ -906,3 +906,69 @@ aside {
 ::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.25);
 }
+
+/* INGESTION SECTION */
+.ingest-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.ingest-form input {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: #fff;
+    font-family: inherit;
+    font-size: 12px;
+    padding: 8px 10px;
+    outline: none;
+    width: 100%;
+}
+
+.ingest-form input:focus {
+    border-color: var(--accent);
+}
+
+.ingest-form button {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 8px;
+    font-family: inherit;
+    font-weight: 600;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.ingest-form button:hover {
+    background: #5b4bc4;
+}
+
+.ingest-status {
+    font-size: 11px;
+    margin-top: 8px;
+    line-height: 1.4;
+    padding: 6px 10px;
+    border-radius: 4px;
+}
+
+.ingest-status.loading {
+    color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border-color);
+}
+
+.ingest-status.success {
+    color: var(--color-risk-low);
+    background: rgba(46, 213, 115, 0.08);
+    border: 1px solid rgba(46, 213, 115, 0.2);
+}
+
+.ingest-status.error {
+    color: var(--color-risk-high);
+    background: rgba(255, 82, 82, 0.08);
+    border: 1px solid rgba(255, 82, 82, 0.2);
+}

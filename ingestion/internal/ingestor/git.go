@@ -95,6 +95,10 @@ func (g *Git) CheckConnectivity(ctx context.Context) error {
 // emit everything at HEAD; on subsequent runs we only emit changed files
 // since `checkpoint..HEAD`.
 func (g *Git) Fetch(ctx context.Context, runID, checkpoint string) (*nif.Batch, string, error) {
+	if err := g.CheckConnectivity(ctx); err != nil {
+		return nil, checkpoint, fmt.Errorf("git connectivity check: %w", err)
+	}
+
 	headOut, err := g.runGit(ctx, "rev-parse", "HEAD")
 	if err != nil {
 		return nil, checkpoint, fmt.Errorf("git rev-parse HEAD: %w", err)

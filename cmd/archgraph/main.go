@@ -101,7 +101,7 @@ func main() {
 
 	// --- Boot pipelined ---
 	pipelineCmd, err := startZone(ctx, "pipeline", pipelineDir, "./cmd/pipelined",
-		"-addr", pipelineAddr, "-db", *pipelineDb, "-zone4", storageURL)
+		"-addr", pipelineAddr, "-db", *pipelineDb, "-storage", storageURL)
 	if err != nil {
 		log.Printf("[archgraph] start pipeline: %v", err)
 		stop()

@@ -58,6 +58,13 @@ func (r *Registry) Get(id string) (ingestor.Ingestor, bool) {
 	return i, ok
 }
 
+// Unregister deletes an ingestor from the registry by its ID.
+func (r *Registry) Unregister(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.ing, id)
+}
+
 // List returns the ingestors in deterministic ID order — used by the HTTP
 // /v1/health and /v1/runs handlers.
 func (r *Registry) List() []ingestor.Ingestor {

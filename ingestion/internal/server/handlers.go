@@ -13,12 +13,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"archgraph/nif"
+	"archgraph/ingestion/internal/ingestor"
 	"archgraph/ingestion/internal/ledger"
 	"archgraph/ingestion/internal/orchestrator"
 )
@@ -38,6 +42,7 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /v1/runs", s.listRuns)
 	mux.HandleFunc("GET /v1/ledger", s.listLedger)
 	mux.HandleFunc("GET /v1/ingestors", s.listIngestors)
+	mux.HandleFunc("POST /v1/ingestors", s.registerIngestor)
 	mux.HandleFunc("GET /v1/staleness", s.staleness)
 	mux.HandleFunc("GET /v1/health", s.health)
 	mux.HandleFunc("POST /v1/webhooks/github", s.handleGithubWebhook)
@@ -315,4 +320,101 @@ func addEntityUnique(b *nif.Batch, e *nif.Entity) {
 		}
 	}
 	b.Entities = append(b.Entities, e)
+}
+
+func (s *Server) registerIngestor(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		SourceID  string   `json:"source_id"`
+		RemoteURL string   `json:"remote_url"`
+		Namespace string   `json:"namespace"`
+		Languages []string `json:"languages"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if body.RemoteURL == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("remote_url is required"))
+		return
+	}
+	if body.SourceID == "" {
+		// Extract repo name from remote URL, e.g. "https://github.com/foo/bar.git" -> "bar"
+		cleanURL := strings.TrimSuffix(body.RemoteURL, ".git")
+		parts := strings.Split(cleanURL, "/")
+		if len(parts) > 0 {
+			body.SourceID = parts[len(parts)-1]
+		}
+	}
+	if body.SourceID == "" {
+		body.SourceID = "temp-repo-" + strconv.FormatInt(time.Now().Unix(), 10)
+	}
+	if body.Namespace == "" {
+		body.Namespace = body.SourceID
+	}
+
+	repoPath := filepath.Join("/tmp", "archgraph_clones", body.SourceID)
+
+	// Clean up existing ingestors with this source ID
+	s.Registry.Unregister("git:" + body.SourceID)
+	s.Registry.Unregister("ast-go:" + body.SourceID)
+	s.Registry.Unregister("ast-python:" + body.SourceID)
+	s.Registry.Unregister("ast-ts:" + body.SourceID)
+
+	// Register Git Ingestor
+	gitCfg := ingestor.GitConfig{
+		SourceID:  body.SourceID,
+		RemoteURL: body.RemoteURL,
+		Namespace: body.Namespace,
+		RepoPath:  repoPath,
+	}
+	if err := s.Registry.Register(ingestor.NewGit(gitCfg)); err != nil {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("register git: %w", err))
+		return
+	}
+
+	// Register AST Ingestors
+	langs := body.Languages
+	if len(langs) == 0 {
+		langs = []string{"go"}
+	}
+	for _, lang := range langs {
+		switch strings.ToLower(lang) {
+		case "go":
+			goCfg := ingestor.GoASTConfig{
+				SourceID:  body.SourceID,
+				RootPath:  repoPath,
+				Namespace: body.Namespace,
+			}
+			if err := s.Registry.Register(ingestor.NewGoAST(goCfg)); err != nil {
+				writeErr(w, http.StatusBadRequest, fmt.Errorf("register ast-go: %w", err))
+				return
+			}
+		case "python":
+			pyCfg := ingestor.PythonASTConfig{
+				SourceID:  body.SourceID,
+				RootPath:  repoPath,
+				Namespace: body.Namespace,
+			}
+			if err := s.Registry.Register(ingestor.NewPythonAST(pyCfg)); err != nil {
+				writeErr(w, http.StatusBadRequest, fmt.Errorf("register ast-python: %w", err))
+				return
+			}
+		case "typescript", "ts":
+			tsCfg := ingestor.TypeScriptASTConfig{
+				SourceID:  body.SourceID,
+				RootPath:  repoPath,
+				Namespace: body.Namespace,
+			}
+			if err := s.Registry.Register(ingestor.NewTypeScriptAST(tsCfg)); err != nil {
+				writeErr(w, http.StatusBadRequest, fmt.Errorf("register ast-ts: %w", err))
+				return
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":    "registered",
+		"source_id": body.SourceID,
+		"namespace": body.Namespace,
+	})
 }

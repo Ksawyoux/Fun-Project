@@ -49,6 +49,16 @@
             <!-- LEFT CONTROL & SMMELLS PANEL -->
             <aside class="left-panel glass">
                 <div class="panel-section">
+                    <h2>📥 Ingest Repository</h2>
+                    <div class="ingest-form">
+                        <input type="text" id="ingest-repo-url" placeholder="https://github.com/user/repo.git">
+                        <input type="text" id="ingest-namespace" placeholder="Namespace (e.g. my-app)">
+                        <button id="btn-ingest-repo">Scan & Ingest</button>
+                    </div>
+                    <div id="ingest-status" class="ingest-status hidden"></div>
+                </div>
+
+                <div class="panel-section">
                     <h2>Filter Tiers</h2>
                     <div class="filter-group">
                         <label class="checkbox-container">

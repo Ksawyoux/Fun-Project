@@ -2155,8 +2155,10 @@ func generateDocumentation(ctx context.Context, storageAddr, servingAddr, namesp
 
 func handleDashboard(ctx context.Context, storageAddr, servingAddr, namespace string, args []string) {
 	port := "8084"
+	ingestionAddr := "http://localhost:8083"
 	fsCmd := flag.NewFlagSet("dashboard", flag.ExitOnError)
 	fsCmd.StringVar(&port, "port", "8084", "Dashboard web server port")
+	fsCmd.StringVar(&ingestionAddr, "ingestion", "http://localhost:8083", "Ingestion daemon base URL")
 	_ = fsCmd.Parse(args)
 
 	// Create sub-FS for the web files
@@ -2173,15 +2175,85 @@ func handleDashboard(ctx context.Context, storageAddr, servingAddr, namespace st
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"storage":     storageAddr,
 			"serving":     servingAddr,
-			"namespace": namespace,
+			"namespace":   namespace,
+			"ingestion":   ingestionAddr,
 		})
 	})
+
+	// Handle dynamic repository ingestion from the dashboard
+	mux.HandleFunc("POST /api/ingest", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			RepoURL   string   `json:"repo_url"`
+			Namespace string   `json:"namespace"`
+			Languages []string `json:"languages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if req.RepoURL == "" {
+			http.Error(w, "repo_url is required", http.StatusBadRequest)
+			return
+		}
+
+		// 1. Register the new source via Ingestion daemon
+		regBody, _ := json.Marshal(map[string]any{
+			"remote_url": req.RepoURL,
+			"namespace":  req.Namespace,
+			"languages":  req.Languages,
+		})
+		respReg, err := http.Post(ingestionAddr+"/v1/ingestors", "application/json", bytes.NewReader(regBody))
+		if err != nil {
+			http.Error(w, "Failed to connect to Ingestion daemon: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		defer respReg.Body.Close()
+		if respReg.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(respReg.Body)
+			http.Error(w, "Ingestion daemon registration failed: "+string(bodyBytes), http.StatusBadRequest)
+			return
+		}
+
+		var regResp struct {
+			Namespace string `json:"namespace"`
+			SourceID  string `json:"source_id"`
+		}
+		_ = json.NewDecoder(respReg.Body).Decode(&regResp)
+
+		// 2. Trigger the manual ingestion run
+		respRun, err := http.Post(ingestionAddr+"/v1/runs", "application/json", bytes.NewReader([]byte(`{"trigger":"manual"}`)))
+		if err != nil {
+			http.Error(w, "Failed to trigger Ingestion run: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		defer respRun.Body.Close()
+
+		if respRun.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(respRun.Body)
+			http.Error(w, "Ingestion run failed: "+string(bodyBytes), http.StatusInternalServerError)
+			return
+		}
+
+		// Read the run summary to return it and know if it was successful
+		var summary struct {
+			RunID string `json:"run_id"`
+		}
+		var buf bytes.Buffer
+		tee := io.TeeReader(respRun.Body, &buf)
+		_ = json.NewDecoder(tee).Decode(&summary)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(buf.Bytes())
+	})
+
 	// Serve static files
 	mux.Handle("/", http.FileServer(http.FS(subFS)))
 
 	serverAddr := ":" + port
 	fmt.Printf("🚀 Starting Web Dashboard on http://localhost:%s ...\n", port)
 	fmt.Printf("Connecting to Serving at %s\n", servingAddr)
+	fmt.Printf("Connecting to Ingestion at %s\n", ingestionAddr)
 
 	// Attempt to open the web browser automatically
 	go func() {
