@@ -7,7 +7,18 @@
     <link rel="stylesheet" href="style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <!-- Apply theme before first paint to avoid a flash. Default follows OS; manual choice is remembered. -->
+    <script>
+        (function () {
+            try {
+                var stored = localStorage.getItem("theme");
+                var prefersLight = window.matchMedia("(prefers-color-scheme: light)").matches;
+                var useLight = stored ? stored === "light" : prefersLight;
+                if (useLight) document.documentElement.classList.add("light-theme");
+            } catch (e) {}
+        })();
+    </script>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
@@ -16,21 +27,38 @@
     <div class="dashboard-container">
         <!-- TOP NAVIGATION BAR -->
         <header class="top-nav">
-            <div class="brand">
-                <span class="logo">🏗️</span>
+            <div class="brand" onclick="switchView('home')">
+                <svg class="code-wiki-logo" width="24" height="24" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                        <linearGradient id="logo-top" x1="6" y1="4" x2="26" y2="14" gradientUnits="userSpaceOnUse">
+                            <stop offset="0%" stop-color="#FF9F43" />
+                            <stop offset="100%" stop-color="#FF5252" />
+                        </linearGradient>
+                        <linearGradient id="logo-mid" x1="6" y1="11" x2="26" y2="21" gradientUnits="userSpaceOnUse">
+                            <stop offset="0%" stop-color="#00EFD2" />
+                            <stop offset="100%" stop-color="#007CF0" />
+                        </linearGradient>
+                        <linearGradient id="logo-bot" x1="6" y1="18" x2="26" y2="28" gradientUnits="userSpaceOnUse">
+                            <stop offset="0%" stop-color="#7928CA" />
+                            <stop offset="100%" stop-color="#B535F6" />
+                        </linearGradient>
+                    </defs>
+                    <path d="M 16 18 L 26 23 L 16 28 L 6 23 Z" fill="url(#logo-bot)" />
+                    <path d="M 16 11 L 26 16 L 16 21 L 6 16 Z" fill="url(#logo-mid)" />
+                    <path d="M 16 4 L 26 9 L 16 14 L 6 9 Z" fill="url(#logo-top)" />
+                </svg>
                 <div class="brand-text">
-                    <h1>ArchGraph</h1>
-                    <span class="tagline">System Blueprint & Governance</span>
+                    <h1>Code Wiki</h1>
                 </div>
             </div>
 
             <!-- VIEW SELECTOR TABS (Google style) -->
-            <nav class="view-tabs">
-                <button class="view-tab active" id="tab-graph" onclick="switchView('graph')">📊 Visualizer</button>
+            <nav class="view-tabs hidden">
+                <button class="view-tab" id="tab-graph" onclick="switchView('graph')">📊 Visualizer</button>
                 <button class="view-tab" id="tab-wiki" onclick="switchView('wiki')">📖 Code Wiki</button>
             </nav>
 
-            <div class="stats-bar">
+            <div class="stats-bar hidden">
                 <div class="stat-badge">
                     <span class="label">Namespace</span>
                     <span class="value" id="stat-namespace">--</span>
@@ -48,17 +76,67 @@
                     <span class="value" id="stat-health">Healthy</span>
                 </div>
             </div>
-            <div class="server-status">
+            <div class="server-status hidden">
                 <span class="indicator connected"></span>
                 <span class="status-text">Connected</span>
+            </div>
+            <div class="header-right">
+                <button class="icon-btn" id="btn-theme-toggle" title="Toggle Dark/Light Mode">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                    </svg>
+                </button>
+                <button class="icon-btn" id="btn-help" title="Help & Documentation">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                    </svg>
+                </button>
             </div>
         </header>
 
         <!-- MAIN VIEWPORT CONTAINER -->
         <div class="main-content">
             
+            <!-- VIEW 0: HOME LANDING PAGE -->
+            <div id="view-home" class="view-pane active">
+                <div class="home-hero">
+                    <div class="home-logo-large">
+                        <h1 class="hero-title">Code Wiki</h1>
+                    </div>
+                    <p class="hero-subtitle">
+                        A new perspective on development for the agentic era.<br>
+                        Gemini-generated documentation, always up-to-date.
+                    </p>
+                    <div class="search-container-wrap">
+                        <div class="search-glow"></div>
+                        <div class="search-box-large">
+                            <input type="text" id="search-repo-input" placeholder="Find open source repos" autocomplete="off">
+                            <button id="btn-search-repo" class="search-icon-btn" title="Search or Ingest">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="11" cy="11" r="8"></circle>
+                                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Search/Ingestion status progress -->
+                    <div id="home-ingest-status" class="ingest-status hidden"></div>
+                    
+                    <!-- Namespace suggestions -->
+                    <div class="repo-suggestions" id="repo-suggestions">
+                        <span class="suggestion-label">Available Namespaces</span>
+                        <div class="suggestion-chips" id="suggestion-chips">
+                            <!-- Populated dynamically in app.js -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- VIEW 1: ARCHITECTURE GRAPH VISUALIZER -->
-            <div id="view-graph" class="view-pane active">
+            <div id="view-graph" class="view-pane hidden">
                 <!-- LEFT CONTROL & SMELLS PANEL -->
                 <aside class="left-panel glass">
                     <div class="panel-section">
@@ -204,12 +282,23 @@
             <div id="view-wiki" class="view-pane hidden">
                 <!-- Left TOC Sidebar -->
                 <aside class="wiki-toc glass">
-                    <div class="wiki-brand">Arch<span>Wiki</span></div>
                     <div class="wiki-ns-switcher">
-                        <span class="lbl">Namespace:</span>
+                        <span class="lbl">Namespace</span>
                         <input type="text" id="wiki-ns-input" placeholder="acme" value="acme">
                     </div>
+                    <div class="wiki-toc-label">On this page</div>
                     <div id="wiki-toc-list" class="wiki-toc-list"></div>
+                    <div class="wiki-toc-footer" id="wiki-toc-footer">
+                        <div class="wiki-meta-row">
+                            <span class="k">Updated on</span>
+                            <span class="v" id="wiki-updated">—</span>
+                        </div>
+                        <div class="wiki-meta-row">
+                            <span class="k">Commit</span>
+                            <span class="v" id="wiki-commit">—</span>
+                        </div>
+                        <div class="wiki-disclaimer">Gemini can make mistakes, so double-check it.</div>
+                    </div>
                 </aside>
 
                 <!-- Center Documentation Viewer -->
@@ -222,13 +311,33 @@
                 <!-- Right AI Assistant Panel -->
                 <aside class="wiki-assistant glass">
                     <div class="assistant-header">
-                        <h3>🤖 Wiki Assistant</h3>
-                        <span class="subtitle">Deep-grounded AI Repository Expert</span>
+                        <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+                            <defs>
+                                <linearGradient id="spark-sm" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse">
+                                    <stop offset="0%" stop-color="#4285F4" />
+                                    <stop offset="50%" stop-color="#9B72CB" />
+                                    <stop offset="100%" stop-color="#D96570" />
+                                </linearGradient>
+                            </defs>
+                            <path d="M12 2c.4 4.6 2.4 6.6 7 7-4.6.4-6.6 2.4-7 7-.4-4.6-2.4-6.6-7-7 4.6-.4 6.6-2.4 7-7z" fill="url(#spark-sm)" />
+                        </svg>
+                        <h3>Chat</h3>
                     </div>
                     <div class="assistant-chat-container">
                         <div class="chat-history" id="wiki-chat-history">
-                            <div class="chat-message system">
-                                🤖 Ask me anything about this subsystem or the broader codebase. I'm grounded strictly in the repository's structural knowledge graph.
+                            <div class="assistant-empty" id="wiki-assistant-empty">
+                                <svg class="spark-gem" viewBox="0 0 24 24" aria-hidden="true">
+                                    <defs>
+                                        <linearGradient id="spark-lg" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse">
+                                            <stop offset="0%" stop-color="#4285F4" />
+                                            <stop offset="50%" stop-color="#9B72CB" />
+                                            <stop offset="100%" stop-color="#D96570" />
+                                        </linearGradient>
+                                    </defs>
+                                    <path d="M12 2c.4 4.6 2.4 6.6 7 7-4.6.4-6.6 2.4-7 7-.4-4.6-2.4-6.6-7-7 4.6-.4 6.6-2.4 7-7z" fill="url(#spark-lg)" />
+                                </svg>
+                                <h4>Hi there!</h4>
+                                <p>Ask me any questions about this codebase.</p>
                             </div>
                         </div>
                         <div class="wiki-suggestions">
@@ -236,8 +345,8 @@
                             <button class="suggest-chip" onclick="askWikiAssistant('Are there any microservice design smells or circular dependencies here?')">Audit smells</button>
                         </div>
                         <div class="chat-input-area">
-                            <textarea id="wiki-chat-input" placeholder="Ask a question about this subsystem..."></textarea>
-                            <button id="btn-wiki-send-question">Ask Assistant</button>
+                            <textarea id="wiki-chat-input" placeholder="Ask about this repository"></textarea>
+                            <button id="btn-wiki-send-question">Send</button>
                         </div>
                     </div>
                 </aside>
